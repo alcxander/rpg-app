@@ -1,0 +1,159 @@
+// app/api/battles/[id]/regenerate-map/route.ts
+export async function POST(req: Request, context: { params: Promise<{ id: string }> }) {
+  const { id } = await context.params
+  const { userId, getToken } = await auth()
+  if (!userId || !getToken) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const token = await getToken({ template: 'supabase' })
+  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  try {
+    const supabase = createServerSupabaseClient(token)
+    const { theme } = await req.json().catch(() => ({} as any))
+    const { data: battle } = await supabase.from('battles').select('id, session_id').eq('id', id).maybeSingle()
+    if (!battle) return NextResponse.json({ error: 'Battle not found' }, { status: 404 })
+
+    const url = new URL('/api/generate-map', req.url).toString()
+    const prompt = `Top-down 2D tabletop battle map${theme ? `, theme: ${theme}` : ''}. Vivid, high-contrast, grid-friendly, no labels.`
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Cookie': req.headers.get('cookie') || '' }, body: JSON.stringify({ prompt }) })
+    const j = await res.json().catch(() => ({}))
+    if (!res.ok) return NextResponse.json({ error: j?.error || 'Map generation failed' }, { status: 500 })
+
+    await supabase.from('battles').update({ background_image: j.image }).eq('id', id)
+    await supabase.from('maps').update({ background_image: j.image, updated_at: new Date().toISOString() }).eq('session_id', battle.session_id)
+
+    return NextResponse.json({ ok: true, image: j.image })
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message || 'Failed to regenerate map' }, { status: 500 })
+  }
+}
+
+// app/api/battles/[id]/initiative/route.ts
+export async function PUT(req: Request, context: { params: Promise<{ id: string }> }) {
+  const { id } = await context.params
+  const { userId, getToken } = await auth()
+  if (!userId || !getToken) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const token = await getToken({ template: 'supabase' })
+  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  try {
+    const { initiative, order } = await req.json()
+    const supabase = createServerSupabaseClient(token)
+    const { data: battle, error: bErr } = await supabase.from('battles').select('id, session_id').eq('id', id).maybeSingle()
+    if (bErr || !battle) return NextResponse.json({ error: 'Battle not found' }, { status: 404 })
+
+    const { error: updErr } = await supabase.from('battles').update({ initiative }).eq('id', id)
+    if (updErr) return NextResponse.json({ error: updErr.message }, { status: 403 })
+
+    return NextResponse.json({ ok: true })
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message || 'Failed to save initiative' }, { status: 500 })
+  }
+}
+
+// app/api/battles/[id]/log/route.ts
+export async function POST(req: Request, context: { params: Promise<{ id: string }> }) {
+  const { id } = await context.params
+  const { userId, getToken } = await auth()
+  if (!userId || !getToken) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const token = await getToken({ template: 'supabase' })
+  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  try {
+    const { message } = await req.json()
+    if (!message || typeof message !== 'string') return NextResponse.json({ error: 'message is required' }, { status: 400 })
+
+    const supabase = createServerSupabaseClient(token)
+    const { data: battle, error: bErr } = await supabase.from('battles').select('id, log').eq('id', id).maybeSingle()
+    if (bErr || !battle) return NextResponse.json({ error: 'Battle not found' }, { status: 404 })
+
+    const nextLog = Array.isArray(battle.log) ? [...battle.log.map(String), String(message)] : [String(message)]
+    const { error: updErr } = await supabase.from('battles').update({ log: nextLog }).eq('id', id)
+    if (updErr) return NextResponse.json({ error: updErr.message }, { status: 403 })
+
+    return NextResponse.json({ ok: true })
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message || 'Failed to append log' }, { status: 500 })
+  }
+}
+
+// app/api/battles/[id]/entities/route.ts
+export async function PUT(req: Request, context: { params: Promise<{ id: string }> }) {
+  const { id } = await context.params
+  const { userId, getToken } = await auth()
+  if (!userId || !getToken) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const token = await getToken({ template: 'supabase' })
+  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  try {
+    const body = await req.json()
+    const { monsters, allies, initiative } = body || {}
+    const supabase = createServerSupabaseClient(token)
+
+    const { error } = await supabase.from('battles').update({
+      ...(Array.isArray(monsters) ? { monsters } : {}),
+      ...(Array.isArray(allies) ? { allies } : {}),
+      ...(initiative && typeof initiative === 'object' ? { initiative } : {}),
+    }).eq('id', id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 403 })
+
+    return NextResponse.json({ ok: true })
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message || 'Failed to update entities' }, { status: 500 })
+  }
+}
+
+// components/CanvasMap.tsx
+function safeSetBackgroundImage(c: fabric.Canvas, img: fabric.Image | null, opts: { left?: number; top?: number; originX?: string; originY?: string; scaleX?: number; scaleY?: number } = {}) {
+  if (img) {
+    img.set({
+      left: opts.left ?? 0,
+      top: opts.top ?? 0,
+      originX: (opts.originX as any) ?? 'left',
+      originY: (opts.originY as any) ?? 'top',
+      scaleX: opts.scaleX ?? 1,
+      scaleY: opts.scaleY ?? 1,
+      selectable: false,
+      evented: false,
+    })
+  }
+  // Fabric v6: set backgroundImage directly; v5: setBackgroundImage exists
+  const anyCanvas = c as any
+  if (typeof anyCanvas.setBackgroundImage === 'function') {
+    anyCanvas.setBackgroundImage(img, undefined, opts)
+  } else {
+    ;(c as any).backgroundImage = img
+  }
+}
+
+function drawStatic() {
+  if (bgImg && !disposed) {
+    const iw = (bgImg as any).width || (bgImg as any)?.getElement?.()?.naturalWidth || 1
+    const ih = (bgImg as any).height || (bgImg as any)?.getElement?.()?.naturalHeight || 1
+    const scale = Math.max(mapWidth / iw, mapHeight / ih)
+    safeSetBackgroundImage(c, bgImg, { left: 0, top: 0, originX: 'left', originY: 'top', scaleX: scale, scaleY: scale })
+  } else {
+    safeSetBackgroundImage(c, null)
+  }
+}
+
+// components/InitiativeList.tsx
+const onDragStart = (e: React.DragEvent<HTMLDivElement>, id: string) => {
+  setDragId(id)
+  try { e.dataTransfer.setData('text/plain', id) } catch {}
+  e.dataTransfer.effectAllowed = 'move'
+}
+
+return (
+  <div className="flex items-center gap-2">
+    <span className="truncate max-w-[220px] block">{(b as any).name ? `${(b as any).name}` : 'Battle'}</span>
+    <span className="text-xs text-gray-400 flex-shrink-0">{new Date(b.created_at).toLocaleString()}</span>
+  </div>
+)
+
+// app/page.tsx
+<SelectItem key={b.id} value={b.id}>
+  <div className="flex items-center gap-2">
+    <span className="truncate max-w-[220px] block">{(b as any).name ? `${(b as any).name}` : 'Battle'}</span>
+    <span className="text-xs text-gray-400 flex-shrink-0">{new Date(b.created_at).toLocaleString()}</span>
+  </div>
+</SelectItem>

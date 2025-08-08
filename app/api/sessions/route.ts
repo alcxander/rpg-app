@@ -59,7 +59,10 @@ export async function POST(req: Request) {
 
   const upsert = await supabase
     .from('sessions')
-    .upsert({ id: sessionId, campaign_id: campaignId, active: true, participants }, { onConflict: 'id' })
+    .upsert(
+      { id: sessionId, campaign_id: campaignId, active: true, participants },
+      { onConflict: 'campaign_id,id' }
+    )
     .select('id, participants')
     .single();
 

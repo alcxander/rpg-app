@@ -26,6 +26,7 @@ export type Database = {
           name: string | null;
           slug: string | null;
           background_image: string | null;
+          initiative: Json | null; 
         }
         Insert: {
           allies?: Json | null
@@ -38,6 +39,7 @@ export type Database = {
           name?: string | null;
           slug?: string | null;
           background_image?: string | null;
+          initiative?: Json | null; 
         }
         Update: {
           allies?: Json | null
@@ -50,6 +52,7 @@ export type Database = {
           name?: string | null;
           slug?: string | null;
           background_image?: string | null;
+          initiative?: Json | null; 
         }
         Relationships: [
           {

@@ -301,4 +301,3 @@ export function useRealtimeSession(sessionId: string | null) {
 
   return { sessionState, emitEvent, isLoading, error, moveTokenAndLog, setSessionState }
 }
- 

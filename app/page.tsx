@@ -716,7 +716,11 @@ export default function HomePage() {
             <TokenList monsters={currentMonsters} pcs={currentPCs} onHoverToken={(id) => setHighlightTokenId(id)} />
 
             {/* Restored Initiative component */}
-            <Initiative tokens={sessionState.map?.tokens || []} onHighlightToken={(id) => setHighlightTokenId(id)} />
+            <Initiative
+              battle={sessionState.battle || null}
+              tokens={sessionState.map?.tokens || []}
+              onHighlightToken={(id) => setHighlightTokenId(id)}
+            />
 
             <div className="h-64">
               <ChatLog messages={sessionState.chatLog} title="Activity Log" />
@@ -786,7 +790,11 @@ export default function HomePage() {
 
             <TokenList monsters={currentMonsters} pcs={currentPCs} onHoverToken={(id) => setHighlightTokenId(id)} />
 
-            <Initiative tokens={sessionState.map?.tokens || []} onHighlightToken={(id) => setHighlightTokenId(id)} />
+            <Initiative
+              battle={sessionState.battle || null}
+              tokens={sessionState.map?.tokens || []}
+              onHighlightToken={(id) => setHighlightTokenId(id)}
+            />
 
             <div className="h-64">
               <ChatLog messages={sessionState.chatLog} title="Activity Log" />

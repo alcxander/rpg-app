@@ -8,7 +8,7 @@ import { ClerkProvider } from '@clerk/nextjs'; // Import ClerkProvider
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'RPG Collaboration App',
+  title: 'DM Tool App',
   description: 'Real-time tabletop RPG collaboration tool for DMs and Players',
 };
 
@@ -20,6 +20,9 @@ export default function RootLayout({
   return (
     <ClerkProvider> {/* Wrap the entire application with ClerkProvider */}
       <html lang="en" suppressHydrationWarning>
+        <head>
+          <link rel="icon" href="/favicon.png" type="image/png" />
+        </head>
         <body className={inter.className} suppressHydrationWarning> {/* Added suppressHydrationWarning here */}
           <ThemeProvider
             attribute="class"

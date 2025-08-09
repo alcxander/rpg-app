@@ -30,6 +30,7 @@ import { ChatLog } from "@/components/ChatLog"
 import { TokenList } from "@/components/TokenList"
 import { BattleForm } from "@/components/BattleForm"
 import LootForm from "@/components/LootForm"
+import Initiative from "@/components/Initiative"
 
 const CanvasMap = dynamic(() => import("@/components/CanvasMap").then((m) => m.default), {
   ssr: false,
@@ -48,7 +49,6 @@ export default function HomePage() {
   const { user, isLoaded, isSignedIn } = useUser()
   const userId = user?.id || null
 
-  // Gate: ensure our DB user exists
   const [userReady, setUserReady] = useState(false)
   const [ensureUserError, setEnsureUserError] = useState<string | null>(null)
 
@@ -81,14 +81,12 @@ export default function HomePage() {
   const [sendingChat, setSendingChat] = useState(false)
   const { toast } = useToast()
 
-  // Mobile overlays
   const [generatorsOpen, setGeneratorsOpen] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
 
-  // Token highlight
   const [highlightTokenId, setHighlightTokenId] = useState<string | null>(null)
 
-  // Ensure user exists in our DB before rendering the app
+  // Ensure user row exists
   useEffect(() => {
     const run = async () => {
       if (!isLoaded || !isSignedIn) return
@@ -212,19 +210,14 @@ export default function HomePage() {
 
   const handleTokenMove = useCallback(
     (tokenId: string, x: number, y: number) => {
-      // Broadcast + optimistic Activity Log update so it always updates locally
+      // Single-source update + log via realtime broadcast
       moveTokenAndLog(tokenId, x, y)
-      const token = sessionState.map?.tokens.find((t) => String(t.id) === String(tokenId))
-      const name = token?.name || "Token"
-      const coord = String.fromCharCode("A".charCodeAt(0) + x) + String(y + 1)
-      setSessionState((prev) => ({ ...prev, chatLog: [...prev.chatLog, `${name} moved to ${coord}`] }))
     },
-    [moveTokenAndLog, sessionState.map?.tokens, setSessionState],
+    [moveTokenAndLog],
   )
 
   const memoMap = useMemo(() => sessionState.map ?? null, [sessionState.map])
 
-  // Convert a battle's monsters/allies into MapToken[] snapshot
   const tokensFromBattle = useCallback((battle: any): MapToken[] => {
     const monsters: any[] = Array.isArray(battle?.monsters) ? battle.monsters : []
     const allies: any[] = Array.isArray(battle?.allies) ? battle.allies : []
@@ -312,7 +305,6 @@ export default function HomePage() {
     [sessionId, userId, toast, emitEvent, setSessionState],
   )
 
-  // Switch to a battle: apply its snapshot to the map and set chat log
   const onSelectBattle = (battleId: string) => {
     const b: any = sessionState.battles.find((x) => x.id === battleId) || null
     if (!b) return
@@ -552,7 +544,7 @@ export default function HomePage() {
 
       <main className="flex flex-1 overflow-hidden">
         <div className="flex flex-1 min-h-0">
-          {/* Left sidebar (hidden on mobile) */}
+          {/* Left sidebar */}
           <aside className="hidden md:flex w-[380px] p-4 border-r border-gray-700 bg-gray-800 flex-col space-y-4 overflow-y-auto">
             <h2 className="text-xl font-semibold text-purple-400">Campaign & Session</h2>
 
@@ -698,7 +690,7 @@ export default function HomePage() {
             )}
           </section>
 
-          {/* Right sidebar (hidden on mobile) */}
+          {/* Right sidebar */}
           <aside className="hidden lg:flex w-[340px] p-4 border-l border-gray-700 bg-gray-800 flex-col space-y-4 overflow-y-auto">
             <div className="space-y-2">
               <div className="flex items-center gap-2">
@@ -723,6 +715,9 @@ export default function HomePage() {
 
             <TokenList monsters={currentMonsters} pcs={currentPCs} onHoverToken={(id) => setHighlightTokenId(id)} />
 
+            {/* Restored Initiative component */}
+            <Initiative tokens={sessionState.map?.tokens || []} onHighlightToken={(id) => setHighlightTokenId(id)} />
+
             <div className="h-64">
               <ChatLog messages={sessionState.chatLog} title="Activity Log" />
             </div>
@@ -730,7 +725,7 @@ export default function HomePage() {
         </div>
       </main>
 
-      {/* Generators Dialog (mobile-friendly) */}
+      {/* Generators Dialog */}
       <Dialog open={generatorsOpen} onOpenChange={setGeneratorsOpen}>
         <DialogContent className="sm:max-w-[680px] bg-gray-800 text-white border-gray-700">
           <DialogHeader>
@@ -765,7 +760,7 @@ export default function HomePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Details Dialog (mobile-friendly: current battle, tokens, activity log) */}
+      {/* Details Dialog */}
       <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
         <DialogContent className="sm:max-w-[680px] bg-gray-800 text-white border-gray-700">
           <DialogHeader>
@@ -791,6 +786,8 @@ export default function HomePage() {
 
             <TokenList monsters={currentMonsters} pcs={currentPCs} onHoverToken={(id) => setHighlightTokenId(id)} />
 
+            <Initiative tokens={sessionState.map?.tokens || []} onHighlightToken={(id) => setHighlightTokenId(id)} />
+
             <div className="h-64">
               <ChatLog messages={sessionState.chatLog} title="Activity Log" />
             </div>
@@ -808,7 +805,6 @@ export default function HomePage() {
         <DialogContent className="sm:max-w-[600px] bg-gray-800 text-white border-gray-700">
           <DialogHeader>
             <DialogTitle className="text-2xl text-purple-400">{llmResponseTitle}</DialogTitle>
-            <DialogDescription className="text-gray-400">Details of the response or error.</DialogDescription>
           </DialogHeader>
           <div className="max-h-[400px] overflow-y-auto p-4 bg-gray-700 rounded-md text-sm font-mono text-gray-200">
             <pre className="whitespace-pre-wrap break-words">{llmResponseContent}</pre>
@@ -824,7 +820,7 @@ export default function HomePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Battle Form dialog (shared desktop/mobile) */}
+      {/* Battle Form dialog */}
       {true && (
         <BattleForm
           isOpen={showBattleForm}

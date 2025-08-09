@@ -46,7 +46,9 @@ export default function CanvasMap({ mapData, isDM, onTokenMove, highlightTokenId
   const canvasElRef = useRef<HTMLCanvasElement>(null)
   const canvasRef = useRef<fabric.Canvas | null>(null)
 
-  const tokenGroupsRef = useRef<Map<string, fabric.Group>>(new Map())
+  const tokenGroupsRef = useRef<
+    Map<string, fabric.Group & { tokenMeta?: { id: string; type?: "monster" | "pc" }; _border?: fabric.Circle }>
+  >(new Map())
   const bgImageObjRef = useRef<any>(null)
 
   const [size, setSize] = useState({ width: 0, height: 0 })
@@ -83,7 +85,7 @@ export default function CanvasMap({ mapData, isDM, onTokenMove, highlightTokenId
   const mapWidth = gridSize * CELL_SIZE
   const mapHeight = gridSize * CELL_SIZE
 
-  // Observe container size only, do not dispose canvas on size change
+  // Observe container size only
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -113,7 +115,7 @@ export default function CanvasMap({ mapData, isDM, onTokenMove, highlightTokenId
     }
   }, [])
 
-  // Create canvas and attach handlers ONCE (do not depend on size or callbacks)
+  // Create canvas and attach handlers ONCE
   useEffect(() => {
     if (!canvasElRef.current) return
     const c = new fabric.Canvas(canvasElRef.current, {
@@ -187,6 +189,7 @@ export default function CanvasMap({ mapData, isDM, onTokenMove, highlightTokenId
       e.stopPropagation()
     })
 
+    // Snap and emit on end
     c.on("object:moving", (e) => {
       const obj = e.target
       if (!obj) return
@@ -195,13 +198,11 @@ export default function CanvasMap({ mapData, isDM, onTokenMove, highlightTokenId
         top: Math.round((obj.top || 0) / CELL_SIZE) * CELL_SIZE,
       })
     })
-
     c.on("object:modified", (e) => {
       const obj = e.target as (fabric.Group & { tokenMeta?: { id: string } }) | undefined
       if (!obj?.tokenMeta) return
       const newX = Math.round((obj.left || 0) / CELL_SIZE)
       const newY = Math.round((obj.top || 0) / CELL_SIZE)
-      // Use latest ref to avoid re-subscribing this handler
       onTokenMoveRef.current?.(obj.tokenMeta.id, newX, newY)
       obj.set({ left: newX * CELL_SIZE, top: newY * CELL_SIZE })
       canvasRef.current?.requestRenderAll()
@@ -319,9 +320,10 @@ export default function CanvasMap({ mapData, isDM, onTokenMove, highlightTokenId
       selectable: isDM,
       evented: isDM,
       shadow: undefined,
-    }) as fabric.Group & { tokenMeta?: { id: string }; _border?: fabric.Circle }
+    }) as fabric.Group & { tokenMeta?: { id: string; type?: "monster" | "pc" }; _border?: fabric.Circle }
 
-    group.tokenMeta = { id: String(token.id) }
+    group.tokenMeta = { id: String(token.id), type: token.type }
+    group._border = border
 
     try {
       c.add(group)
@@ -409,7 +411,7 @@ export default function CanvasMap({ mapData, isDM, onTokenMove, highlightTokenId
     c.requestRenderAll()
   }
 
-  // STATIC: manifests, grid, initial tokens — run when token set changes or grid changes, NOT on resize
+  // STATIC: manifests, grid, initial tokens — only when set changes
   useEffect(() => {
     const c = canvasRef.current
     if (!c) return
@@ -452,7 +454,7 @@ export default function CanvasMap({ mapData, isDM, onTokenMove, highlightTokenId
     }
   }, [tokenIdsKey, gridSize, mapWidth, mapHeight, isDM, currentMapData.tokens])
 
-  // Background: only if image or grid size changes; do NOT tie to window size
+  // Background: only if image or grid size changes
   useEffect(() => {
     const c = canvasRef.current
     if (!c) return
@@ -478,11 +480,22 @@ export default function CanvasMap({ mapData, isDM, onTokenMove, highlightTokenId
     c.requestRenderAll()
   }, [currentMapData.tokens])
 
-  // Highlight token by id
+  // Highlight token by id (stronger highlight)
   useEffect(() => {
     const c = canvasRef.current
     if (!c) return
-    tokenGroupsRef.current.forEach((g) => g.set({ shadow: undefined }))
+    tokenGroupsRef.current.forEach((g) => {
+      // reset shadow
+      g.set({ shadow: undefined })
+      // reset ring color/width
+      const t = g.tokenMeta?.type
+      if (g._border) {
+        g._border.set({
+          stroke: t === "monster" ? "#7f1d1d" : "#1e3a8a",
+          strokeWidth: 3,
+        })
+      }
+    })
     if (!highlightTokenId) {
       c.requestRenderAll()
       return
@@ -491,12 +504,18 @@ export default function CanvasMap({ mapData, isDM, onTokenMove, highlightTokenId
     if (!g) return
     g.set({
       shadow: new fabric.Shadow({
-        color: "rgba(250, 204, 21, 0.9)",
-        blur: 25,
+        color: "rgba(251, 191, 36, 0.95)", // stronger amber glow
+        blur: 45,
         offsetX: 0,
         offsetY: 0,
       }),
     })
+    if (g._border) {
+      g._border.set({
+        stroke: "#f59e0b", // amber ring
+        strokeWidth: 6,
+      })
+    }
     if (typeof (g as any).bringToFront === "function") {
       ;(g as any).bringToFront()
     }
@@ -505,7 +524,6 @@ export default function CanvasMap({ mapData, isDM, onTokenMove, highlightTokenId
 
   return (
     <div ref={containerRef} className="flex-1 h-full bg-gray-900 rounded-lg overflow-hidden relative">
-      {/* Only mount the canvas element; the canvas object persists across resizes */}
       <canvas ref={canvasElRef} />
       <div className="absolute left-2 bottom-2 text-[11px] text-gray-300 bg-gray-800/70 px-2 py-1 rounded">
         Hold Space and drag, or middle/right-drag to pan. Scroll to zoom.

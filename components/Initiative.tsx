@@ -1,8 +1,7 @@
 "use client"
 
 import type React from "react"
-
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { MapToken } from "@/lib/types"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -15,10 +14,20 @@ type Combatant = {
   id: string
   name: string
   type: "monster" | "pc"
-  dexMod: number
+  stats?: Record<string, any> | null
 }
 
 type InitiativeMap = Record<string, number>
+
+type AbilityMods = {
+  str: number
+  dex: number
+  con: number
+  int: number
+  wis: number
+  cha: number
+}
+type AbilityModsMap = Record<string, AbilityMods>
 
 function parseNum(v: any): number | undefined {
   if (typeof v === "number" && Number.isFinite(v)) return v
@@ -26,16 +35,90 @@ function parseNum(v: any): number | undefined {
   return m ? Number(m[0]) : undefined
 }
 
-function getDexMod(stats: any): number {
-  // Try common keys: DEX_mod, DEX, Dex, dex
-  const mod = parseNum(stats?.DEX_mod ?? stats?.Dex_mod ?? stats?.dex_mod)
+function getDexModFromStats(stats: any): number | undefined {
+  const mod =
+    parseNum(stats?.DEX_mod) ??
+    parseNum(stats?.Dex_mod) ??
+    parseNum(stats?.dex_mod) ??
+    parseNum(stats?.DexMod) ??
+    parseNum(stats?.dexMod)
   if (typeof mod === "number") return mod
-  const dex = parseNum(stats?.DEX ?? stats?.Dex ?? stats?.dex)
+  const dex = parseNum(stats?.DEX) ?? parseNum(stats?.Dex) ?? parseNum(stats?.dex)
   if (typeof dex === "number") {
-    // 5e-style: mod = floor((DEX - 10)/2)
     return Math.floor((dex - 10) / 2)
   }
+  return undefined
+}
+
+function getAbilityModsFromStats(stats: any): AbilityMods | undefined {
+  if (!stats) return undefined
+  // Accept raw ability or direct mods; normalize to mods
+  const norm = (score: any, mod: any) => {
+    const m = parseNum(mod)
+    if (typeof m === "number") return m
+    const s = parseNum(score)
+    if (typeof s === "number") return Math.floor((s - 10) / 2)
+    return undefined
+  }
+  const out: AbilityMods = {
+    str: norm(stats?.STR ?? stats?.Str ?? stats?.str, stats?.STR_mod ?? stats?.Str_mod ?? stats?.str_mod) ?? 0,
+    dex: norm(stats?.DEX ?? stats?.Dex ?? stats?.dex, stats?.DEX_mod ?? stats?.Dex_mod ?? stats?.dex_mod) ?? 0,
+    con: norm(stats?.CON ?? stats?.Con ?? stats?.con, stats?.CON_mod ?? stats?.Con_mod ?? stats?.con_mod) ?? 0,
+    int: norm(stats?.INT ?? stats?.Int ?? stats?.int, stats?.INT_mod ?? stats?.Int_mod ?? stats?.int_mod) ?? 0,
+    wis: norm(stats?.WIS ?? stats?.Wis ?? stats?.wis, stats?.WIS_mod ?? stats?.Wis_mod ?? stats?.wis_mod) ?? 0,
+    cha: norm(stats?.CHA ?? stats?.Cha ?? stats?.cha, stats?.CHA_mod ?? stats?.Cha_mod ?? stats?.cha_mod) ?? 0,
+  }
+  return out
+}
+
+// Weighted random for a typical low-level spread, favoring +1..+3
+// Domain the user suggested: -1..+4; 1,2,3 more common
+function sampleDexMod(): number {
+  const buckets: Array<{ mod: number; w: number }> = [
+    { mod: -1, w: 5 },
+    { mod: 0, w: 12 },
+    { mod: 1, w: 25 },
+    { mod: 2, w: 28 },
+    { mod: 3, w: 20 },
+    { mod: 4, w: 10 },
+  ]
+  const total = buckets.reduce((a, b) => a + b.w, 0)
+  let r = Math.random() * total
+  for (const b of buckets) {
+    if (r < b.w) return b.mod
+    r -= b.w
+  }
+  return 1
+}
+// Sample the rest around zero with a mild bias to 0..+2
+function sampleOtherMod(): number {
+  const buckets: Array<{ mod: number; w: number }> = [
+    { mod: -2, w: 5 },
+    { mod: -1, w: 12 },
+    { mod: 0, w: 28 },
+    { mod: 1, w: 25 },
+    { mod: 2, w: 20 },
+    { mod: 3, w: 8 },
+    { mod: 4, w: 2 },
+  ]
+  const total = buckets.reduce((a, b) => a + b.w, 0)
+  let r = Math.random() * total
+  for (const b of buckets) {
+    if (r < b.w) return b.mod
+    r -= b.w
+  }
   return 0
+}
+
+function generateAbilityMods(): AbilityMods {
+  return {
+    str: sampleOtherMod(),
+    dex: sampleDexMod(),
+    con: sampleOtherMod(),
+    int: sampleOtherMod(),
+    wis: sampleOtherMod(),
+    cha: sampleOtherMod(),
+  }
 }
 
 function buildCombatants(battle: any): Combatant[] {
@@ -44,13 +127,13 @@ function buildCombatants(battle: any): Combatant[] {
     id: String(m.id ?? m.name ?? crypto.randomUUID()),
     name: String(m.name ?? "Monster"),
     type: "monster" as const,
-    dexMod: getDexMod(m?.stats ?? {}),
+    stats: m?.stats ?? {},
   }))
   const pcs = (Array.isArray(battle?.allies) ? battle.allies : []).map((p: any) => ({
     id: String(p.id ?? p.name ?? crypto.randomUUID()),
     name: String(p.name ?? "PC"),
     type: "pc" as const,
-    dexMod: getDexMod(p?.stats ?? {}),
+    stats: p?.stats ?? {},
   }))
   return [...pcs, ...mons]
 }
@@ -66,65 +149,81 @@ export default function Initiative({
 }) {
   const combatants = useMemo(() => buildCombatants(battle), [battle])
 
+  // Stable generated ability mods per-combatant for this session
+  const [abilityMods, setAbilityMods] = useState<AbilityModsMap>({})
+  const seededRef = useRef(false)
+
+  // Seed ability mods once per battle (or hydrate from stats if present)
+  useEffect(() => {
+    if (!combatants.length) {
+      setAbilityMods({})
+      seededRef.current = false
+      return
+    }
+    const next: AbilityModsMap = {}
+    for (const c of combatants) {
+      const fromStats = getAbilityModsFromStats(c.stats)
+      if (fromStats) {
+        next[c.id] = fromStats
+      } else {
+        // Generate if not present
+        next[c.id] = generateAbilityMods()
+      }
+    }
+    setAbilityMods(next)
+    seededRef.current = true
+  }, [battle?.id, combatants])
+
   // Initiative values and order
   const [initiative, setInitiative] = useState<InitiativeMap>({})
   const [order, setOrder] = useState<string[]>(combatants.map((c) => c.id))
   const [activeIdx, setActiveIdx] = useState(0)
   const [dragId, setDragId] = useState<string | null>(null)
 
-  // Initialize from battle or roll once if empty
+  // Initialize from battle or roll once if empty/new
   useEffect(() => {
-    // Hydrate from battle.initiative if present
+    const ids = combatants.map((c) => c.id)
+    if (!ids.length) {
+      setInitiative({})
+      setOrder([])
+      setActiveIdx(0)
+      return
+    }
     const fromBattle: InitiativeMap = { ...(battle?.initiative || {}) }
     const hasAny = Object.keys(fromBattle).length > 0
-
-    // Assign default ids and ensure all present
-    const baseIds = combatants.map((c) => c.id)
     const initVals: InitiativeMap = {}
-    baseIds.forEach((id) => {
+    ids.forEach((id) => {
       const existing = fromBattle[id]
       initVals[id] = typeof existing === "number" ? existing : Number.NaN
     })
 
-    // If no existing values, auto-roll once
-    if (!hasAny && baseIds.length) {
-      const rolled: InitiativeMap = {}
-      for (const c of combatants) {
-        rolled[c.id] = rollInitiative(c.dexMod)
-      }
-      setInitiative(rolled)
-      setOrder(baseIds)
-      setActiveIdx(0)
-      return
-    }
-
-    // If some are NaN (new arrivals), roll for just those
-    const filled: InitiativeMap = { ...initVals }
+    // Roll for missing entries; if none exist, roll for all (once)
+    const rolled: InitiativeMap = { ...initVals }
     for (const c of combatants) {
-      if (!Number.isFinite(filled[c.id])) {
-        filled[c.id] = rollInitiative(c.dexMod)
+      if (!Number.isFinite(rolled[c.id])) {
+        const dex = abilityMods[c.id]?.dex
+        const dexMod = typeof dex === "number" ? dex : (getDexModFromStats(c.stats ?? {}) ?? 0)
+        rolled[c.id] = rollInitiative(dexMod)
       }
     }
+    setInitiative(rolled)
 
-    setInitiative(filled)
-    // Preserve order from battle if it looks like an order array
+    // Order: hydrate, prune, then fill missing in list order
     const maybeOrder =
       Array.isArray(battle?.initiativeOrder) && (battle.initiativeOrder as any[]).every((x) => typeof x === "string")
         ? (battle.initiativeOrder as string[])
-        : baseIds
-    // Ensure order contains only current ids and keeps their relative positions
-    const idSet = new Set(baseIds)
+        : ids
+    const idSet = new Set(ids)
     const pruned = maybeOrder.filter((id) => idSet.has(id))
-    const missing = baseIds.filter((id) => !pruned.includes(id))
+    const missing = ids.filter((id) => !pruned.includes(id))
     setOrder([...pruned, ...missing])
     setActiveIdx(0)
-  }, [battle?.id, JSON.stringify(battle?.initiative), combatants])
+  }, [battle?.id, JSON.stringify(battle?.initiative), combatants, abilityMods])
 
-  // Highlight active or hovered token if available
+  // Map id->token id for highlight
   const idToTokenId = useMemo(() => {
     const map = new Map<string, string>()
     if (tokens && tokens.length) {
-      // Try to map by id, else fallback by name
       for (const t of tokens) {
         map.set(t.id, t.id)
         map.set(`name:${t.name}`, t.id)
@@ -140,13 +239,11 @@ export default function Initiative({
         onHighlightToken(null)
         return
       }
-      // Match by id first
       const direct = idToTokenId.get(combatantId)
       if (direct) {
         onHighlightToken(direct)
         return
       }
-      // Find by name fallback
       const c = combatants.find((x) => x.id === combatantId)
       if (c) {
         const byName = idToTokenId.get(`name:${c.name}`)
@@ -159,14 +256,12 @@ export default function Initiative({
   )
 
   useEffect(() => {
-    // Highlight current active on change
     hoverToken(order[activeIdx] || null)
     return () => hoverToken(null)
   }, [activeIdx, order, hoverToken])
 
-  // Auto-roll function
+  // Standard d20 + dex mod
   const rollInitiative = (dexMod: number) => {
-    // Standard: d20 + dex mod
     return Math.floor(Math.random() * 20) + 1 + (Number.isFinite(dexMod) ? dexMod : 0)
   }
 
@@ -174,10 +269,11 @@ export default function Initiative({
   const autoRollAll = () => {
     const next: InitiativeMap = {}
     for (const c of combatants) {
-      next[c.id] = rollInitiative(c.dexMod)
+      const dex = abilityMods[c.id]?.dex
+      const dexMod = typeof dex === "number" ? dex : (getDexModFromStats(c.stats ?? {}) ?? 0)
+      next[c.id] = rollInitiative(dexMod)
     }
     setInitiative(next)
-    // Keep existing order but you can sort after auto-roll
   }
 
   const sortByRoll = () => {
@@ -185,10 +281,11 @@ export default function Initiative({
       const ai = initiative[a] ?? Number.NEGATIVE_INFINITY
       const bi = initiative[b] ?? Number.NEGATIVE_INFINITY
       if (bi !== ai) return bi - ai
-      // tie-break by dex, then by name
+      const da = abilityMods[a]?.dex ?? 0
+      const db = abilityMods[b]?.dex ?? 0
+      if (db !== da) return db - da
       const ca = combatants.find((c) => c.id === a)
       const cb = combatants.find((c) => c.id === b)
-      if ((cb?.dexMod ?? 0) !== (ca?.dexMod ?? 0)) return (cb?.dexMod ?? 0) - (ca?.dexMod ?? 0)
       return (ca?.name || "").localeCompare(cb?.name || "")
     })
     setOrder(next)
@@ -253,9 +350,9 @@ export default function Initiative({
   return (
     <Card className="bg-gray-800 border-gray-700 text-white">
       <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <CardTitle className="text-purple-400">Initiative</CardTitle>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button
               size="sm"
               variant="secondary"
@@ -277,9 +374,9 @@ export default function Initiative({
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <Label className="text-gray-300">Turn Order</Label>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <Button
               variant="secondary"
               size="sm"
@@ -313,12 +410,20 @@ export default function Initiative({
           </div>
         </div>
 
-        <div className="rounded border border-gray-700 divide-y divide-gray-700">
+        <div className="rounded border border-gray-700 divide-y divide-gray-700 max-w-full">
           {order.map((id, index) => {
             const c = combatants.find((x) => x.id === id)
             if (!c) return null
             const active = index === activeIdx
             const val = Number.isFinite(initiative[id]) ? initiative[id] : 0
+            const mods = abilityMods[id] ?? {
+              str: 0,
+              dex: getDexModFromStats(c.stats ?? {}) ?? 0,
+              con: 0,
+              int: 0,
+              wis: 0,
+              cha: 0,
+            }
             return (
               <div
                 key={id}
@@ -327,7 +432,7 @@ export default function Initiative({
                 onDragOver={onDragOver}
                 onDrop={() => onDrop(id)}
                 className={cn(
-                  "flex items-center justify-between p-2 text-sm bg-gray-800 cursor-grab active:cursor-grabbing",
+                  "flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between p-2 text-sm bg-gray-800 cursor-grab active:cursor-grabbing",
                   active ? "ring-1 ring-purple-500/60 bg-purple-900/10" : "",
                   dragId === id && "opacity-70",
                 )}
@@ -336,21 +441,49 @@ export default function Initiative({
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <span className={cn("w-2 h-2 rounded-full", c.type === "monster" ? "bg-red-400" : "bg-blue-400")} />
-                  <span className="truncate">{c.name}</span>
-                  <span className="text-xs text-gray-400">
-                    DEX {c.dexMod >= 0 ? "+" : ""}
-                    {c.dexMod}
+                  <span className="truncate max-w-[12rem]">{c.name}</span>
+                  <span className="text-xs text-gray-400 whitespace-nowrap">
+                    DEX {mods.dex >= 0 ? "+" : ""}
+                    {mods.dex}
                   </span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400">Init</span>
-                  <Input
-                    type="number"
-                    className="w-20 h-8 bg-gray-700 border-gray-600 text-white"
-                    value={val}
-                    onChange={(e) => setInit(id, Number.parseInt(e.target.value || "0", 10) || 0)}
-                    aria-label={`Initiative for ${c.name}`}
-                  />
+                <div className="flex items-center justify-between gap-3 sm:gap-2">
+                  <div className="text-[11px] text-gray-400 flex flex-wrap gap-x-2 gap-y-1">
+                    <span>
+                      STR {mods.str >= 0 ? "+" : ""}
+                      {mods.str}
+                    </span>
+                    <span>
+                      DEX {mods.dex >= 0 ? "+" : ""}
+                      {mods.dex}
+                    </span>
+                    <span>
+                      CON {mods.con >= 0 ? "+" : ""}
+                      {mods.con}
+                    </span>
+                    <span>
+                      INT {mods.int >= 0 ? "+" : ""}
+                      {mods.int}
+                    </span>
+                    <span>
+                      WIS {mods.wis >= 0 ? "+" : ""}
+                      {mods.wis}
+                    </span>
+                    <span>
+                      CHA {mods.cha >= 0 ? "+" : ""}
+                      {mods.cha}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">Init</span>
+                    <Input
+                      type="number"
+                      className="w-20 h-8 bg-gray-700 border-gray-600 text-white"
+                      value={val}
+                      onChange={(e) => setInit(id, Number.parseInt(e.target.value || "0", 10) || 0)}
+                      aria-label={`Initiative for ${c.name}`}
+                    />
+                  </div>
                 </div>
               </div>
             )

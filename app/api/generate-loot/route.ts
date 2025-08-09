@@ -1,70 +1,103 @@
-import { NextResponse } from 'next/server'
-import { auth } from '@clerk/nextjs/server'
-import { createServerSupabaseClient } from '@/lib/supabaseAdmin'
-import { rollLootTables, tableReferences, type LootItem } from '@/lib/loot/tables'
-import { generateText } from 'ai'
-import { openai } from '@ai-sdk/openai'
+import { NextResponse } from "next/server"
+import { auth } from "@clerk/nextjs/server"
+import { createServerSupabaseClient } from "@/lib/supabaseAdmin"
+import { generateContent } from "@/lib/llmClient"
 
-// Generate loot based on CR/party level and current battle if present.
-// Uses simple tables first; if nothing suitable or an explicit fallback is needed, uses LLM. [^3]
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
 export async function POST(req: Request) {
   const { userId, getToken } = await auth()
-  if (!userId || !getToken) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  const token = await getToken({ template: 'supabase' })
-  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!userId || !getToken) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  const token = await getToken({ template: "supabase" })
+  if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   try {
+    const {
+      sessionId,
+      useMapContext,
+      partyLevel,
+      partySize,
+      difficulty, // e.g., "Easy" | "Medium" | "Hard" | "Deadly" | CR like "CR 5"
+      rarityPreference, // "auto" | "low" | "mid" | "high"
+      partyLoot, // boolean => use Xanathar's party loot tables
+      exactLevel, // boolean => "Exact Level" handling
+    } = await req.json()
+
     const supabase = createServerSupabaseClient(token)
-    const { sessionId, battleId, cr, partyLevel, partyLoot, exactLevel } = await req.json()
 
-    if (!sessionId) return NextResponse.json({ error: 'sessionId is required' }, { status: 400 })
-
-    let effectiveCR: string | undefined = cr
-    // If a battle is present, infer CR from monsters if available
-    if (battleId) {
-      const { data: battle } = await supabase.from('battles').select('*').eq('id', battleId).maybeSingle()
-      if (battle && Array.isArray(battle.monsters)) {
-        const crs = (battle.monsters as any[]).map((m) => Number(m?.cr)).filter((n) => !Number.isNaN(n))
-        const avg = crs.length ? crs.reduce((a, b) => a + b, 0) / crs.length : undefined
-        if (avg !== undefined) {
-          if (avg < 1) effectiveCR = 'Easy'
-          else if (avg < 3) effectiveCR = 'Medium'
-          else if (avg < 7) effectiveCR = 'Hard'
-          else effectiveCR = 'Deadly'
-        }
-      }
+    let contextText = ""
+    if (useMapContext && sessionId) {
+      const mapRes = await supabase.from("maps").select("tokens").eq("session_id", sessionId).maybeSingle()
+      const tokens = Array.isArray(mapRes.data?.tokens) ? (mapRes.data!.tokens as any[]) : []
+      const monsters = tokens.filter((t) => t.type === "monster")
+      const players = tokens.filter((t) => t.type === "pc")
+      const monsterNames = monsters.map((m) => m.name).slice(0, 12)
+      contextText = `
+Map context:
+- Players on map: ${players.length}
+- Monsters on map: ${monsters.length}
+- Monsters sample: ${monsterNames.join(", ")}
+Please scale values and rarity to this context if it improves results.
+`
+    } else {
+      contextText = "Map context not used. Use only the provided inputs."
     }
 
-    // Try tables first
-    let loot: LootItem[] | null = null
-    try {
-      loot = rollLootTables({ cr: effectiveCR as any, partyLevel: partyLevel ? Number(partyLevel) : undefined, partyLoot: !!partyLoot, exactLevel: !!exactLevel })
-    } catch {
-      loot = null
-    }
+    // Ask for JSON result so the client can present it nicely. Uses AI SDK [^1].
+    const prompt = `
+You are a TTRPG loot generator. Return JSON ONLY. Do not include markdown fences.
 
-    if (loot && loot.length) {
-      return NextResponse.json({ source: 'tables', references: tableReferences, loot })
-    }
+Inputs:
+- Party level: ${Number(partyLevel) || "unknown"}
+- Party size: ${Number(partySize) || "unknown"}
+- Difficulty or CR: ${String(difficulty || "Medium")}
+- Rarity preference: ${String(rarityPreference || "auto")}
+- Party loot mode (Xanathar's Guide to Everything, pp. 135-136): ${partyLoot ? "ON" : "OFF"}
+- Exact Level handling: ${exactLevel ? "ON" : "OFF"}
+${contextText}
 
-    // Fallback to LLM [^3]
-    const { text } = await generateText({
-      model: openai('gpt-4o'),
-      system: 'You create balanced treasure hoards for TTRPG encounters.',
-      prompt: `Create a JSON array of loot appropriate for an encounter.
-Context:
-- Difficulty: ${effectiveCR || cr || 'Medium'}
-- Party level: ${partyLevel || 3}
-- Party loot: ${partyLoot ? 'Yes' : 'No'}
-- Include coins, trinkets, gear/weapons, and consumables. Scale rarity with difficulty.
-- JSON only. Each item has: { "type": "coin|trinket|gear|consumable", "name"?: string, "amount"?: number, "currency"?: "cp|sp|gp|pp", "rarity"?: "Common|Uncommon|Rare|Very Rare|Legendary" }`,
-    })
+Rules:
+- Always return a mix with possible zero quantities for categories:
+  - trinkets, coins, consumables, scrolls, weapons_gear, adventuring_gear
+- Quantities and quality should generally scale with party level/size and difficulty (or map context if provided).
+- If partyLoot=ON, structure items as a single party hoard; otherwise as encounter loot. If "Exact Level" is ON, include a proportional number of items for partially-completed tiers per Xanathar's guidance.
+- Prefer lower rarity at low levels, increasing with higher challenge/level. "rarity_preference" can nudge item rarities up/down.
+
+JSON shape:
+{
+  "summary": "1-2 sentence summary",
+  "coins": { "cp": number, "sp": number, "gp": number, "pp": number },
+  "trinkets": [{ "name": string, "qty": number, "note"?: string }],
+  "consumables": [{ "name": string, "qty": number, "rarity"?: string, "note"?: string }],
+  "scrolls": [{ "name": string, "qty": number, "rarity"?: string, "note"?: string }],
+  "weapons_gear": [{ "name": string, "qty": number, "rarity"?: string, "note"?: string }],
+  "adventuring_gear": [{ "name": string, "qty": number, "note"?: string }]
+}
+Ensure valid JSON and omit any commentary.
+`
+
+    const text = await generateContent(prompt) // [^1]
+
     let cleaned = text.trim()
-    if (cleaned.startsWith('```json')) cleaned = cleaned.slice('```json'.length)
-    if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3)
-    const parsed = JSON.parse(cleaned)
-    return NextResponse.json({ source: 'llm', loot: parsed, note: 'Generated by AI SDK fallback.' })
+    if (cleaned.startsWith("```json")) cleaned = cleaned.slice("```json".length)
+    if (cleaned.startsWith("```")) cleaned = cleaned.slice(3)
+    if (cleaned.endsWith("```")) cleaned = cleaned.slice(0, -3)
+    cleaned = cleaned.trim()
+
+    let parsed: any
+    try {
+      parsed = JSON.parse(cleaned)
+    } catch (e: any) {
+      return NextResponse.json(
+        { error: "Failed to parse loot JSON from model", raw: cleaned.slice(0, 800) },
+        { status: 500 },
+      )
+    }
+
+    return NextResponse.json({ loot: parsed })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message || 'Failed to generate loot' }, { status: 500 })
+    console.error("[generate-loot] error:", e?.message || e)
+    return NextResponse.json({ error: e?.message || "Internal error" }, { status: 500 })
   }
 }

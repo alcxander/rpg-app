@@ -1,13 +1,14 @@
-'use client'
+"use client"
 
-import React, { useRef, useEffect, useState } from 'react'
-import * as fabric from 'fabric'
-import { MapData, MapToken } from '@/lib/types'
+import { useRef, useEffect, useState } from "react"
+import * as fabric from "fabric"
+import type { MapData, MapToken } from "@/lib/types"
 
 interface CanvasMapProps {
   mapData: MapData | null
   isDM: boolean
   onTokenMove: (tokenId: string, x: number, y: number) => void
+  highlightTokenId?: string | null
 }
 
 const MIN_ZOOM = 0.5
@@ -15,18 +16,9 @@ const MAX_ZOOM = 3
 const ZOOM_STEP = 1.05
 const CELL_SIZE = 50
 
-function shuffle<T>(array: T[]): T[] {
-  const arr = [...array]
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[arr[i], arr[j]] = [arr[j], arr[i]]
-  }
-  return arr
-}
-
 async function loadManifest(path: string): Promise<string[]> {
   try {
-    const res = await fetch(path, { cache: 'no-store' })
+    const res = await fetch(path, { cache: "no-store" })
     if (!res.ok) return []
     const data = await res.json()
     return Array.isArray(data) ? data : []
@@ -37,7 +29,7 @@ async function loadManifest(path: string): Promise<string[]> {
 
 function isCrossOrigin(url: string) {
   try {
-    if (url.startsWith('data:')) return false
+    if (url.startsWith("data:")) return false
     const u = new URL(url, window.location.origin)
     return u.origin !== window.location.origin
   } catch {
@@ -45,50 +37,17 @@ function isCrossOrigin(url: string) {
   }
 }
 
-async function tryLoadImage(url: string): Promise<fabric.Image | null> {
-  try {
-    const img = await (fabric.Image.fromURL as any)(
-      url,
-      isCrossOrigin(url) ? { crossOrigin: 'anonymous' } : undefined
-    )
-    return img as fabric.Image
-  } catch {
-    return null
-  }
+async function loadImageSafe(url: string): Promise<any> {
+  return await fabric.Image.fromURL(url, isCrossOrigin(url) ? { crossOrigin: "anonymous" as const } : undefined)
 }
 
-// Fabric v6-safe background setter: uses setBackgroundImage if available, else assigns backgroundImage directly
-function safeSetBackgroundImage(
-  c: fabric.Canvas,
-  img: fabric.Image | null,
-  opts: { left?: number; top?: number; originX?: string; originY?: string; scaleX?: number; scaleY?: number } = {}
-) {
-  if (img) {
-    img.set({
-      left: opts.left ?? 0,
-      top: opts.top ?? 0,
-      originX: (opts.originX as any) ?? 'left',
-      originY: (opts.originY as any) ?? 'top',
-      scaleX: opts.scaleX ?? 1,
-      scaleY: opts.scaleY ?? 1,
-      selectable: false,
-      evented: false,
-    })
-  }
-  const anyCanvas = c as any
-  if (typeof anyCanvas.setBackgroundImage === 'function') {
-    anyCanvas.setBackgroundImage(img, undefined, opts)
-  } else {
-    ;(c as any).backgroundImage = img
-  }
-}
-
-export default function CanvasMap({ mapData, isDM, onTokenMove }: CanvasMapProps) {
+export default function CanvasMap({ mapData, isDM, onTokenMove, highlightTokenId = null }: CanvasMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasElRef = useRef<HTMLCanvasElement>(null)
   const canvasRef = useRef<fabric.Canvas | null>(null)
 
   const tokenGroupsRef = useRef<Map<string, fabric.Group>>(new Map())
+  const bgImageObjRef = useRef<any>(null)
 
   const [size, setSize] = useState({ width: 0, height: 0 })
   const isDraggingRef = useRef(false)
@@ -100,7 +59,7 @@ export default function CanvasMap({ mapData, isDM, onTokenMove }: CanvasMapProps
   const mapsManifestRef = useRef<string[] | null>(null)
 
   const currentMapData: MapData = mapData || {
-    session_id: '',
+    session_id: "",
     grid_size: 20,
     terrain_data: {},
     tokens: [],
@@ -129,13 +88,17 @@ export default function CanvasMap({ mapData, isDM, onTokenMove }: CanvasMapProps
 
   // Spacebar panning
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => { if (e.code === 'Space') panningModeRef.current = true }
-    const onKeyUp = (e: KeyboardEvent) => { if (e.code === 'Space') panningModeRef.current = false }
-    window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('keyup', onKeyUp)
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space") panningModeRef.current = true
+    }
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") panningModeRef.current = false
+    }
+    window.addEventListener("keydown", onKeyDown)
+    window.addEventListener("keyup", onKeyUp)
     return () => {
-      window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener("keydown", onKeyDown)
+      window.removeEventListener("keyup", onKeyUp)
     }
   }, [])
 
@@ -148,20 +111,21 @@ export default function CanvasMap({ mapData, isDM, onTokenMove }: CanvasMapProps
         width: size.width,
         height: size.height,
         selection: false,
-        backgroundColor: '#111827',
+        backgroundColor: "#111827",
       })
       canvasRef.current = c
 
-      c.on('mouse:down', (opt: any) => {
+      c.on("mouse:down", (opt: any) => {
         const e = opt?.e as MouseEvent | TouchEvent | undefined
         if (!e) return
         let button = 0
-        let clientX = 0, clientY = 0
-        if ('button' in e) {
+        let clientX = 0,
+          clientY = 0
+        if ("button" in e) {
           button = (e as MouseEvent).button
           clientX = (e as MouseEvent).clientX
           clientY = (e as MouseEvent).clientY
-        } else if ('touches' in e && e.touches[0]) {
+        } else if ("touches" in e && e.touches[0]) {
           clientX = e.touches[0].clientX
           clientY = e.touches[0].clientY
         }
@@ -170,22 +134,23 @@ export default function CanvasMap({ mapData, isDM, onTokenMove }: CanvasMapProps
         if (isMiddle || isRight || panningModeRef.current) {
           isDraggingRef.current = true
           lastPosRef.current = { x: clientX, y: clientY }
-          c.setCursor('grabbing')
+          c.setCursor("grabbing")
           ;(e as any).preventDefault?.()
         }
       })
 
-      c.on('mouse:move', (opt: any) => {
+      c.on("mouse:move", (opt: any) => {
         if (!isDraggingRef.current) return
         const e = opt?.e as MouseEvent | TouchEvent | undefined
         const vpt = c.viewportTransform
         if (!vpt || !e) return
 
-        let clientX = 0, clientY = 0
-        if ('clientX' in (e as any)) {
+        let clientX = 0,
+          clientY = 0
+        if ("clientX" in (e as any)) {
           clientX = (e as MouseEvent).clientX
           clientY = (e as MouseEvent).clientY
-        } else if ('touches' in (e as any) && (e as TouchEvent).touches[0]) {
+        } else if ("touches" in (e as any) && (e as TouchEvent).touches[0]) {
           clientX = (e as TouchEvent).touches[0].clientX
           clientY = (e as TouchEvent).touches[0].clientY
         }
@@ -198,12 +163,12 @@ export default function CanvasMap({ mapData, isDM, onTokenMove }: CanvasMapProps
         c.requestRenderAll()
       })
 
-      c.on('mouse:up', () => {
+      c.on("mouse:up", () => {
         isDraggingRef.current = false
-        c.setCursor('default')
+        c.setCursor("default")
       })
 
-      c.on('mouse:wheel', (opt: any) => {
+      c.on("mouse:wheel", (opt: any) => {
         const e = opt?.e as WheelEvent | undefined
         if (!e) return
         let zoom = c.getZoom()
@@ -217,8 +182,8 @@ export default function CanvasMap({ mapData, isDM, onTokenMove }: CanvasMapProps
         e.stopPropagation()
       })
 
-      // Snap to grid while moving
-      c.on('object:moving', (e) => {
+      // Snap and emit on end
+      c.on("object:moving", (e) => {
         const obj = e.target
         if (!obj) return
         obj.set({
@@ -226,9 +191,7 @@ export default function CanvasMap({ mapData, isDM, onTokenMove }: CanvasMapProps
           top: Math.round((obj.top || 0) / CELL_SIZE) * CELL_SIZE,
         })
       })
-
-      // Notify on release
-      c.on('object:modified', (e) => {
+      c.on("object:modified", (e) => {
         const obj = e.target as (fabric.Group & { tokenMeta?: { id: string } }) | undefined
         if (!obj?.tokenMeta) return
         const newX = Math.round((obj.left || 0) / CELL_SIZE)
@@ -237,18 +200,18 @@ export default function CanvasMap({ mapData, isDM, onTokenMove }: CanvasMapProps
         obj.set({ left: newX * CELL_SIZE, top: newY * CELL_SIZE })
         canvasRef.current?.requestRenderAll()
       })
-
       ;(c as any).upperCanvasEl && ((c as any).upperCanvasEl.oncontextmenu = (e: Event) => e.preventDefault())
 
       return () => {
         c.dispose()
         canvasRef.current = null
         tokenGroupsRef.current.clear()
+        bgImageObjRef.current = null
       }
     } else {
       const c = canvasRef.current
       c.setDimensions({ width: size.width, height: size.height })
-      c.backgroundColor = '#111827'
+      c.backgroundColor = "#111827"
       c.requestRenderAll()
     }
   }, [size, onTokenMove])
@@ -257,71 +220,33 @@ export default function CanvasMap({ mapData, isDM, onTokenMove }: CanvasMapProps
     return arr.length ? arr[Math.floor(Math.random() * arr.length)] : fallback
   }
 
-  // Build a Group containing the image clipped in a circle + a border ring
-  const buildTokenVisual = async (token: MapToken): Promise<fabric.Group> => {
+  // Token visual
+  const buildTokenVisual = async (token: MapToken): Promise<fabric.Object> => {
     let url = token.image
     if (!url) {
-      const pool = token.type === 'monster' ? (enemiesManifestRef.current || []) : (playersManifestRef.current || [])
-      url = choose(pool, '/maps/forest_01.jpg')
+      const pool = token.type === "monster" ? enemiesManifestRef.current || [] : playersManifestRef.current || []
+      url = choose(pool, "/placeholder.svg?height=100&width=100")
     }
 
-    const img = await (fabric.Image.fromURL as any)(
-      url,
-      isCrossOrigin(url) ? { crossOrigin: 'anonymous' } : undefined
-    ) as fabric.Image
+    const img: any = await loadImageSafe(url).catch(() => null)
 
-    const diameter = CELL_SIZE
-    const iw = (img as any).width || 1
-    const ih = (img as any).height || 1
-    const scale = Math.min(diameter / iw, diameter / ih)
+    const radius = CELL_SIZE / 2
+    if (!img) {
+      // fallback colored circle
+      return new fabric.Circle({ left: 0, top: 0, radius, fill: token.type === "monster" ? "#b91c1c" : "#1d4ed8" })
+    }
 
-    img.set({
-      originX: 'center',
-      originY: 'center',
-      left: diameter / 2,
-      top: diameter / 2,
-      scaleX: scale,
-      scaleY: scale,
-      opacity: 1,
-      objectCaching: true,
-      selectable: false,
-      evented: false,
-    })
+    const iw = img.width || 1
+    const ih = img.height || 1
+    const scale = Math.max(CELL_SIZE / iw, CELL_SIZE / ih)
+    img.set({ left: 0, top: 0, scaleX: scale, scaleY: scale })
 
-    const clip = new fabric.Circle({
-      radius: diameter / 2,
-      originX: 'center',
-      originY: 'center',
-      left: diameter / 2,
-      top: diameter / 2,
-      absolutePositioned: false,
-    })
-    img.set('clipPath', clip)
+    // circular clip
+    const clip = new fabric.Circle({ radius, left: radius, top: radius, originX: "center", originY: "center" })
+    ;(clip as any).absolutePositioned = false
+    img.set("clipPath", clip)
 
-    const border = new fabric.Circle({
-      radius: diameter / 2,
-      originX: 'center',
-      originY: 'center',
-      left: diameter / 2,
-      top: diameter / 2,
-      fill: 'transparent',
-      stroke: token.type === 'monster' ? '#ef4444' : '#60a5fa',
-      strokeWidth: 3,
-      selectable: false,
-      evented: false,
-    })
-
-    const group = new fabric.Group([img, border], {
-      left: 0,
-      top: 0,
-      width: diameter,
-      height: diameter,
-      selectable: false,
-      evented: false,
-      objectCaching: true,
-    })
-
-    return group
+    return img
   }
 
   const upsertTokenGroup = async (token: MapToken, c: fabric.Canvas) => {
@@ -336,22 +261,33 @@ export default function CanvasMap({ mapData, isDM, onTokenMove }: CanvasMapProps
       return
     }
 
-    let visualGroup: fabric.Object
+    let visual: fabric.Object
     try {
-      visualGroup = await buildTokenVisual(token)
+      visual = await buildTokenVisual(token)
     } catch {
-      visualGroup = new fabric.Group([
-        new fabric.Circle({
-          originX: 'center', originY: 'center',
-          left: CELL_SIZE / 2, top: CELL_SIZE / 2, radius,
-          fill: token.type === 'monster' ? '#dc2626' : '#2563eb',
-        }),
-      ], { width: CELL_SIZE, height: CELL_SIZE })
+      visual = new fabric.Circle({ left: 0, top: 0, radius, fill: token.type === "monster" ? "#b91c1c" : "#1d4ed8" })
     }
 
-    visualGroup.set({
+    visual.set({ left: 0, top: 0, selectable: isDM, evented: isDM })
+
+    const border = new fabric.Circle({
+      radius,
+      left: radius,
+      top: radius,
+      originX: "center",
+      originY: "center",
+      fill: "transparent",
+      stroke: token.type === "monster" ? "#7f1d1d" : "#1e3a8a", // darker
+      strokeWidth: 3, // thicker
+      selectable: false,
+      evented: false,
+    })
+
+    const group = new fabric.Group([visual, border], {
       left,
       top,
+      width: CELL_SIZE,
+      height: CELL_SIZE,
       hasControls: false,
       hasBorders: false,
       lockRotation: true,
@@ -359,72 +295,137 @@ export default function CanvasMap({ mapData, isDM, onTokenMove }: CanvasMapProps
       lockScalingY: true,
       selectable: isDM,
       evented: isDM,
-    })
+      shadow: undefined,
+    }) as fabric.Group & { tokenMeta?: { id: string }; _border?: fabric.Circle }
 
-    const group = visualGroup as fabric.Group & { tokenMeta?: { id: string } }
     group.tokenMeta = { id: String(token.id) }
 
-    // Only canvas-level 'object:modified' handler is used to avoid duplicates
-    c.add(group)
-    tokenGroupsRef.current.set(String(token.id), group)
+    group.on("modified", () => {
+      const newX = Math.round((group.left || 0) / CELL_SIZE)
+      const newY = Math.round((group.top || 0) / CELL_SIZE)
+      onTokenMove(group.tokenMeta!.id, newX, newY)
+      group.set({ left: newX * CELL_SIZE, top: newY * CELL_SIZE })
+      canvasRef.current?.requestRenderAll()
+    })
+
+    try {
+      c.add(group)
+      tokenGroupsRef.current.set(String(token.id), group)
+    } catch (e) {
+      console.error("upsertTokenGroup: add failed", e)
+    }
   }
 
   const drawGrid = (c: fabric.Canvas) => {
     for (let i = 0; i <= gridSize; i++) {
-      c.add(new fabric.Line([i * CELL_SIZE, 0, i * CELL_SIZE, mapHeight], { stroke: '#374151', strokeWidth: 1, selectable: false, evented: false }))
-      c.add(new fabric.Line([0, i * CELL_SIZE, mapWidth, i * CELL_SIZE], { stroke: '#374151', strokeWidth: 1, selectable: false, evented: false }))
+      c.add(
+        new fabric.Line([i * CELL_SIZE, 0, i * CELL_SIZE, mapHeight], {
+          stroke: "#374151",
+          strokeWidth: 1,
+          selectable: false,
+          evented: false,
+        }),
+      )
+      c.add(
+        new fabric.Line([0, i * CELL_SIZE, mapWidth, i * CELL_SIZE], {
+          stroke: "#374151",
+          strokeWidth: 1,
+          selectable: false,
+          evented: false,
+        }),
+      )
     }
   }
 
-  // Robust static drawing — wait for background image if provided; otherwise fallback to local manifest
+  async function resolveBackgroundCandidate(): Promise<string> {
+    const manifestChoice =
+      mapsManifestRef.current && mapsManifestRef.current.length
+        ? mapsManifestRef.current[Math.floor(Math.random() * mapsManifestRef.current.length)]
+        : "/placeholder.svg?height=800&width=800"
+    return currentMapData.background_image || manifestChoice
+  }
+
+  async function loadBackground(c: fabric.Canvas) {
+    // Try candidate, then a random manifest entry, then a placeholder
+    const tried: string[] = []
+    const candidate = await resolveBackgroundCandidate()
+    const candidates: string[] = [candidate]
+
+    if (mapsManifestRef.current?.length) {
+      // add a couple of random manifest fallbacks
+      const shuffled = [...mapsManifestRef.current].sort(() => Math.random() - 0.5).slice(0, 3)
+      for (const u of shuffled) if (!candidates.includes(u)) candidates.push(u)
+    }
+    candidates.push("/placeholder.svg?height=800&width=800")
+
+    let fImg: any = null
+    for (const url of candidates) {
+      try {
+        fImg = await loadImageSafe(url)
+        if (fImg) break
+      } catch {
+        tried.push(url)
+      }
+    }
+    if (!fImg) throw new Error("All background candidates failed: " + tried.join(", "))
+
+    const iw = fImg.width || (fImg as any)?.getElement?.()?.naturalWidth || 1
+    const ih = fImg.height || (fImg as any)?.getElement?.()?.naturalHeight || 1
+    const scale = Math.max(mapWidth / iw, mapHeight / ih)
+    fImg.set({
+      left: 0,
+      top: 0,
+      selectable: false,
+      evented: false,
+      scaleX: scale,
+      scaleY: scale,
+    })
+
+    // Remove previous bg if any
+    if (bgImageObjRef.current) {
+      try {
+        c.remove(bgImageObjRef.current)
+      } catch {}
+      bgImageObjRef.current = null
+    }
+
+    c.add(fImg)
+    if (typeof (c as any).sendToBack === "function") {
+      ;(c as any).sendToBack(fImg)
+    } else {
+      // fallback: rebuild stacking with bg first
+      const others = c.getObjects().filter((o) => o !== fImg)
+      c.clear()
+      c.backgroundColor = "#111827"
+      c.add(fImg)
+      for (const o of others) c.add(o)
+    }
+    bgImageObjRef.current = fImg
+  }
+
+  // STATIC render
   useEffect(() => {
     const c = canvasRef.current
     if (!c) return
     let disposed = false
 
     const drawStatic = async () => {
-      // Batch changes to avoid flicker
-      const prev = (c as any).renderOnAddRemove
-      ;(c as any).renderOnAddRemove = false
-
       c.clear()
-      c.backgroundColor = '#111827'
+      c.backgroundColor = "#111827"
 
-      if (!enemiesManifestRef.current) enemiesManifestRef.current = await loadManifest('/tokens/enemies/manifest.json')
-      if (!playersManifestRef.current) playersManifestRef.current = await loadManifest('/tokens/players/manifest.json')
-      if (!mapsManifestRef.current) mapsManifestRef.current = await loadManifest('/maps/manifest.json')
+      // Manifests
+      if (!enemiesManifestRef.current) enemiesManifestRef.current = await loadManifest("/tokens/enemies/manifest.json")
+      if (!playersManifestRef.current) playersManifestRef.current = await loadManifest("/tokens/players/manifest.json")
+      if (!mapsManifestRef.current) mapsManifestRef.current = await loadManifest("/maps/manifest.json")
 
-      // Choose background: use provided image if any; otherwise fallback to local manifests; last resort placeholder
-      const candidates: string[] = []
-      if (currentMapData.background_image) candidates.push(currentMapData.background_image)
-      if (!currentMapData.background_image && mapsManifestRef.current?.length) candidates.push(...shuffle(mapsManifestRef.current))
-      candidates.push('/placeholder.svg?height=1000&width=1000')
-
-      let bgImg: fabric.Image | null = null
-      for (const url of candidates) {
-        bgImg = await tryLoadImage(url)
-        if (bgImg) break
-      }
-
-      if (bgImg && !disposed) {
-        const iw = (bgImg as any).width || (bgImg as any)?.getElement?.()?.naturalWidth || 1
-        const ih = (bgImg as any).height || (bgImg as any)?.getElement?.()?.naturalHeight || 1
-        const scale = Math.max(mapWidth / iw, mapHeight / ih)
-        safeSetBackgroundImage(c, bgImg, { left: 0, top: 0, originX: 'left', originY: 'top', scaleX: scale, scaleY: scale })
-      } else {
-        safeSetBackgroundImage(c, null)
-      }
-
-      // Grid (after background)
+      // Grid & tokens first
       drawGrid(c)
-
-      // Tokens
       tokenGroupsRef.current.clear()
-      for (const t of (currentMapData.tokens || [])) {
+      for (const t of currentMapData.tokens || []) {
         await upsertTokenGroup(t, c)
       }
 
-      // Fit & center
+      // Fit & center viewport
       const scaleFit = Math.min((size.width || 1) / mapWidth, (size.height || 1) / mapHeight)
       const zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, scaleFit))
       c.setZoom(zoom)
@@ -433,14 +434,21 @@ export default function CanvasMap({ mapData, isDM, onTokenMove }: CanvasMapProps
         vpt[4] = (size.width - mapWidth * zoom) / 2
         vpt[5] = (size.height - mapHeight * zoom) / 2
       }
-
-      // Unfreeze render
-      ;(c as any).renderOnAddRemove = prev
       c.requestRenderAll()
+
+      try {
+        await loadBackground(c)
+        if (disposed) return
+        c.requestRenderAll()
+      } catch (err) {
+        console.error("background: failed to load any candidate", err)
+      }
     }
 
     drawStatic()
-    return () => { disposed = true }
+    return () => {
+      disposed = true
+    }
   }, [
     gridSize,
     mapWidth,
@@ -469,9 +477,32 @@ export default function CanvasMap({ mapData, isDM, onTokenMove }: CanvasMapProps
     c.requestRenderAll()
   }, [currentMapData.tokens])
 
+  // Highlight token by id (shadow pulse)
+  useEffect(() => {
+    const c = canvasRef.current
+    if (!c) return
+    tokenGroupsRef.current.forEach((g) => g.set({ shadow: undefined }))
+    if (!highlightTokenId) {
+      c.requestRenderAll()
+      return
+    }
+    const g = tokenGroupsRef.current.get(String(highlightTokenId))
+    if (!g) return
+    g.set({
+      shadow: new fabric.Shadow({
+        color: "rgba(250, 204, 21, 0.9)", // amber glow
+        blur: 25,
+        offsetX: 0,
+        offsetY: 0,
+      }),
+    })
+    ;(g as any).bringToFront?.()
+    c.requestRenderAll()
+  }, [highlightTokenId])
+
   return (
     <div ref={containerRef} className="flex-1 h-full bg-gray-900 rounded-lg overflow-hidden relative">
-      {size.width > 0 && size.height > 0 && <canvas ref={canvasElRef} style={{ width: '100%', height: '100%' }} />}
+      {size.width > 0 && size.height > 0 && <canvas ref={canvasElRef} />}
       <div className="absolute left-2 bottom-2 text-[11px] text-gray-300 bg-gray-800/70 px-2 py-1 rounded">
         Hold Space and drag, or middle/right-drag to pan. Scroll to zoom.
       </div>

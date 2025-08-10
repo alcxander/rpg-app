@@ -31,6 +31,7 @@ import { TokenList } from "@/components/TokenList"
 import { BattleForm } from "@/components/BattleForm"
 import LootForm from "@/components/LootForm"
 import Initiative from "@/components/Initiative"
+import { useRouter } from "next/navigation"
 
 const CanvasMap = dynamic(() => import("@/components/CanvasMap").then((m) => m.default), {
   ssr: false,
@@ -48,6 +49,7 @@ type SessionOption = { id: string; campaign_id: string }
 export default function HomePage() {
   const { user, isLoaded, isSignedIn } = useUser()
   const userId = user?.id || null
+  const router = useRouter()
 
   // Gate: ensure our DB user exists
   const [userReady, setUserReady] = useState(false)
@@ -386,7 +388,11 @@ export default function HomePage() {
     const res = await fetch("/api/invite", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ campaignId: selectedCampaignId, userIdToInvite: inviteUserId.trim(), name: user?.primaryEmailAddress?.toString() || "Guest" }),
+      body: JSON.stringify({
+        campaignId: selectedCampaignId,
+        userIdToInvite: inviteUserId.trim(),
+        name: user?.primaryEmailAddress?.toString() || "Guest",
+      }),
     })
     const data = await res.json().catch(() => ({}))
     if (res.ok) {
@@ -457,7 +463,8 @@ export default function HomePage() {
       <div className="h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-6 text-center">
         <h1 className="text-2xl font-semibold mb-2">Setting up your account...</h1>
         <p className="text-gray-400 max-w-md mb-4">
-          We’re linking your profile to the game database, if you're seeing this sorry just gotta link your profile across systems. It drops sometimes. You must exist in our database to use the app.
+          We’re linking your profile to the game database, if you're seeing this sorry just gotta link your profile
+          across systems. It drops sometimes. You must exist in our database to use the app.
         </p>
         {ensureUserError && <p className="text-red-400 text-sm mb-2">{ensureUserError}</p>}
         <Button onClick={() => location.reload()} className="bg-purple-600 hover:bg-purple-700 text-white">
@@ -495,11 +502,11 @@ export default function HomePage() {
               <DropdownMenuItem onClick={() => setGeneratorsOpen(true)} className="focus:bg-gray-700">
                 <Wand2 className="w-4 h-4 mr-2" /> Generate Loot
               </DropdownMenuItem>
-              <DropdownMenuItem disabled className="focus:bg-gray-700">
-                <Gem className="w-4 h-4 mr-2" /> Generate Loot (Soon)
+              <DropdownMenuItem onClick={() => router.push("/shopkeepers")} className="focus:bg-gray-700">
+                <Store className="w-4 h-4 mr-2" /> Shopkeepers
               </DropdownMenuItem>
               <DropdownMenuItem disabled className="focus:bg-gray-700">
-                <Store className="w-4 h-4 mr-2" /> Generate Shopkeeper (Soon)
+                <Gem className="w-4 h-4 mr-2" /> Generate Loot (Soon)
               </DropdownMenuItem>
               <DropdownMenuItem disabled className="focus:bg-gray-700">
                 <MapIcon className="w-4 h-4 mr-2" /> Generate Map (Soon)

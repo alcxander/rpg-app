@@ -1,6 +1,5 @@
 /**
- * Shopkeeper and inventory generator.
- * Generates at least 5 items with realistic counts and prices locked-in.
+ * Shopkeeper and inventory generator with debug logging.
  */
 import { type ShopType, pickCatalog, clampTo5Percent, type CatalogItem, type Rarity } from "./pricing"
 
@@ -155,6 +154,7 @@ function clampByType(items: CatalogItem[], min: number, max: number): CatalogIte
 }
 
 export function generateShopkeepers(count = 5): GeneratedShopkeeper[] {
+  console.log("[generator] start generateShopkeepers", { count })
   const result: GeneratedShopkeeper[] = []
   for (let i = 0; i < count; i++) {
     const type = pick(SHOP_TYPES)
@@ -181,7 +181,7 @@ export function generateShopkeepers(count = 5): GeneratedShopkeeper[] {
       })
       .filter((x) => x.stock_quantity > 0)
 
-    result.push({
+    const shop: GeneratedShopkeeper = {
       name,
       race,
       age,
@@ -190,7 +190,18 @@ export function generateShopkeepers(count = 5): GeneratedShopkeeper[] {
       description,
       shop_type: type,
       items,
+    }
+    console.log("[generator] generated shopkeeper", {
+      index: i,
+      shop_type: type,
+      name,
+      race,
+      age,
+      alignment,
+      items_count: items.length,
     })
+    result.push(shop)
   }
+  console.log("[generator] finished generateShopkeepers", { generated: result.length })
   return result
 }

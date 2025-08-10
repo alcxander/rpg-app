@@ -1,10 +1,4 @@
-export type Json =
-  | string
-  | number
-  | boolean
-  | null
-  | { [key: string]: Json | undefined }
-  | Json[]
+export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[]
 
 export type Database = {
   // Allows to automatically instanciate createClient with right options
@@ -23,10 +17,10 @@ export type Database = {
           map_ref: string | null
           monsters: Json | null
           session_id: string | null
-          name: string | null;
-          slug: string | null;
-          background_image: string | null;
-          initiative: Json | null; 
+          name: string | null
+          slug: string | null
+          background_image: string | null
+          initiative: Json | null
         }
         Insert: {
           allies?: Json | null
@@ -36,10 +30,10 @@ export type Database = {
           map_ref?: string | null
           monsters?: Json | null
           session_id?: string | null
-          name?: string | null;
-          slug?: string | null;
-          background_image?: string | null;
-          initiative?: Json | null; 
+          name?: string | null
+          slug?: string | null
+          background_image?: string | null
+          initiative?: Json | null
         }
         Update: {
           allies?: Json | null
@@ -49,10 +43,10 @@ export type Database = {
           map_ref?: string | null
           monsters?: Json | null
           session_id?: string | null
-          name?: string | null;
-          slug?: string | null;
-          background_image?: string | null;
-          initiative?: Json | null; 
+          name?: string | null
+          slug?: string | null
+          background_image?: string | null
+          initiative?: Json | null
         }
         Relationships: [
           {
@@ -79,6 +73,7 @@ export type Database = {
           owner_id: string | null
           settings: Json | null
           updated_at: string | null
+          access_enabled: boolean | null
         }
         Insert: {
           created_at?: string | null
@@ -87,6 +82,7 @@ export type Database = {
           owner_id?: string | null
           settings?: Json | null
           updated_at?: string | null
+          access_enabled?: boolean | null
         }
         Update: {
           created_at?: string | null
@@ -95,6 +91,7 @@ export type Database = {
           owner_id?: string | null
           settings?: Json | null
           updated_at?: string | null
+          access_enabled?: boolean | null
         }
         Relationships: [
           {
@@ -156,7 +153,7 @@ export type Database = {
           terrain_data: Json | null
           tokens: Json | null
           updated_at: string | null
-          background_image: string | null;
+          background_image: string | null
         }
         Insert: {
           created_at?: string | null
@@ -165,7 +162,7 @@ export type Database = {
           terrain_data?: Json | null
           tokens?: Json | null
           updated_at?: string | null
-          background_image?: string | null;
+          background_image?: string | null
         }
         Update: {
           created_at?: string | null
@@ -174,7 +171,7 @@ export type Database = {
           terrain_data?: Json | null
           tokens?: Json | null
           updated_at?: string | null
-          background_image?: string | null;
+          background_image?: string | null
         }
         Relationships: [
           {
@@ -189,31 +186,31 @@ export type Database = {
       // NEW: messages table types (chat)
       messages: {
         Row: {
-          id: string;
-          session_id: string;
-          campaign_id: string | null;
-          user_id: string;
-          content: string;
-          created_at: string;
-        };
+          id: string
+          session_id: string
+          campaign_id: string | null
+          user_id: string
+          content: string
+          created_at: string
+        }
         Insert: {
-          id?: string;
-          session_id: string;
-          campaign_id?: string | null;
-          user_id: string;
-          content: string;
-          created_at?: string;
-        };
+          id?: string
+          session_id: string
+          campaign_id?: string | null
+          user_id: string
+          content: string
+          created_at?: string
+        }
         Update: {
-          id?: string;
-          session_id?: string | null;
-          campaign_id?: string | null;
-          user_id?: string;
-          content?: string;
-          created_at?: string | null;
-        };
-        Relationships: [];
-      };
+          id?: string
+          session_id?: string | null
+          campaign_id?: string | null
+          user_id?: string
+          content?: string
+          created_at?: string | null
+        }
+        Relationships: []
+      }
       sessions: {
         Row: {
           active: boolean | null
@@ -317,6 +314,242 @@ export type Database = {
         }
         Relationships: []
       }
+      tokens: {
+        Row: {
+          id: string
+          type: "shopkeeper" | "enemy" | "player"
+          image_url: string
+          description: string | null
+          session_id: string | null
+          campaign_id: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          type: "shopkeeper" | "enemy" | "player"
+          image_url: string
+          description?: string | null
+          session_id?: string | null
+          campaign_id?: string | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          type?: "shopkeeper" | "enemy" | "player"
+          image_url?: string
+          description?: string | null
+          session_id?: string | null
+          campaign_id?: string | null
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tokens_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tokens_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      shopkeepers: {
+        Row: {
+          id: string
+          campaign_id: string
+          name: string
+          race: string | null
+          age: number | null
+          alignment: string | null
+          quote: string | null
+          description: string | null
+          shop_type: "potion" | "arcana" | "blacksmith" | "general" | "custom"
+          token_id: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          campaign_id: string
+          name: string
+          race?: string | null
+          age?: number | null
+          alignment?: string | null
+          quote?: string | null
+          description?: string | null
+          shop_type: "potion" | "arcana" | "blacksmith" | "general" | "custom"
+          token_id?: string | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          campaign_id?: string
+          name?: string
+          race?: string | null
+          age?: number | null
+          alignment?: string | null
+          quote?: string | null
+          description?: string | null
+          shop_type?: "potion" | "arcana" | "blacksmith" | "general" | "custom"
+          token_id?: string | null
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shopkeepers_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shopkeepers_token_id_fkey"
+            columns: ["token_id"]
+            isOneToOne: false
+            referencedRelation: "tokens"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      shop_inventory: {
+        Row: {
+          id: string
+          shopkeeper_id: string
+          item_name: string
+          rarity: "common" | "uncommon" | "rare" | "wondrous" | "legendary"
+          base_price: number
+          price_adjustment_percent: number
+          final_price: number
+          stock_quantity: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          shopkeeper_id: string
+          item_name: string
+          rarity: "common" | "uncommon" | "rare" | "wondrous" | "legendary"
+          base_price: number
+          price_adjustment_percent?: number
+          final_price: number
+          stock_quantity?: number
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          shopkeeper_id?: string
+          item_name?: string
+          rarity?: "common" | "uncommon" | "rare" | "wondrous" | "legendary"
+          base_price?: number
+          price_adjustment_percent?: number
+          final_price?: number
+          stock_quantity?: number
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shop_inventory_shopkeeper_id_fkey"
+            columns: ["shopkeeper_id"]
+            isOneToOne: false
+            referencedRelation: "shopkeepers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      players_gold: {
+        Row: {
+          id: string
+          player_id: string
+          campaign_id: string
+          gold_amount: number
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          player_id: string
+          campaign_id: string
+          gold_amount?: number
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          player_id?: string
+          campaign_id?: string
+          gold_amount?: number
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "players_gold_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "players_gold_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      shop_transactions: {
+        Row: {
+          id: string
+          shopkeeper_id: string
+          player_id: string
+          item_name: string
+          quantity: number
+          price_each: number
+          total_price: number
+          transaction_type: "purchase" | "sell"
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          shopkeeper_id: string
+          player_id: string
+          item_name: string
+          quantity: number
+          price_each: number
+          total_price: number
+          transaction_type: "purchase" | "sell"
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          shopkeeper_id?: string
+          player_id?: string
+          item_name?: string
+          quantity?: number
+          price_each?: number
+          total_price?: number
+          transaction_type?: "purchase" | "sell"
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shop_transactions_shopkeeper_id_fkey"
+            columns: ["shopkeeper_id"]
+            isOneToOne: false
+            referencedRelation: "shopkeepers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shop_transactions_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -356,10 +589,8 @@ export type Tables<
     }
     ? R
     : never
-  : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] &
-        DefaultSchema["Views"])
-    ? (DefaultSchema["Tables"] &
-        DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
+  : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
+    ? (DefaultSchema["Tables"] & DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
         Row: infer R
       }
       ? R
@@ -367,9 +598,7 @@ export type Tables<
     : never
 
 export type TablesInsert<
-  DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
+  DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
   TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
@@ -392,9 +621,7 @@ export type TablesInsert<
     : never
 
 export type TablesUpdate<
-  DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
+  DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
   TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
@@ -417,9 +644,7 @@ export type TablesUpdate<
     : never
 
 export type Enums<
-  DefaultSchemaEnumNameOrOptions extends
-    | keyof DefaultSchema["Enums"]
-    | { schema: keyof DatabaseWithoutInternals },
+  DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"] | { schema: keyof DatabaseWithoutInternals },
   EnumName extends DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }

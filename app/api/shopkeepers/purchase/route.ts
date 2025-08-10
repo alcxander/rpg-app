@@ -6,107 +6,104 @@ export async function POST(req: NextRequest) {
   const { userId } = auth()
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const supabase = createClient()
-  const { inventoryId, quantity = 1, sessionId = null } = await req.json()
+  try {
+    const { inventoryId, quantity, sessionId } = await req.json()
+    const qty = Math.max(1, Math.floor(Number(quantity || 1)))
+    const supabase = createClient()
 
-  if (!inventoryId || quantity <= 0) {
-    return NextResponse.json({ error: "inventoryId and positive quantity required" }, { status: 400 })
-  }
+    // Load inventory + shopkeeper
+    const { data: inv, error: iErr } = await supabase
+      .from("shop_inventory")
+      .select("id, shopkeeper_id, item_name, final_price, stock_quantity, shopkeepers!inner(campaign_id)")
+      .eq("id", inventoryId)
+      .single()
 
-  // Load inventory and related shopkeeper + campaign
-  const { data: inv, error: iErr } = await supabase
-    .from("shop_inventory")
-    .select("id, item_name, final_price, stock_quantity, shopkeeper_id")
-    .eq("id", inventoryId)
-    .single()
-  if (iErr || !inv) return NextResponse.json({ error: "Item not found" }, { status: 404 })
+    if (iErr || !inv) return NextResponse.json({ error: "Item not found" }, { status: 404 })
+    const campaignId = (inv as any).shopkeepers.campaign_id as string
 
-  const { data: shop, error: sErr } = await supabase
-    .from("shopkeepers")
-    .select("id, name, campaign_id")
-    .eq("id", inv.shopkeeper_id)
-    .single()
-  if (sErr || !shop) return NextResponse.json({ error: "Shopkeeper not found" }, { status: 404 })
+    // Load campaign
+    const { data: camp, error: cErr } = await supabase
+      .from("campaigns")
+      .select("id, dm_id, access_enabled")
+      .eq("id", campaignId)
+      .single()
+    if (cErr || !camp) return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
 
-  const { data: campaign, error: cErr } = await supabase
-    .from("campaigns")
-    .select("id, owner_id, access_enabled")
-    .eq("id", shop.campaign_id)
-    .single()
-  if (cErr || !campaign) return NextResponse.json({ error: "Campaign missing" }, { status: 404 })
-
-  const isDM = campaign.owner_id === userId
-  if (!isDM && !campaign.access_enabled) {
-    return NextResponse.json({ error: "Shop access disabled by DM" }, { status: 403 })
-  }
-
-  // Validate stock
-  if (inv.stock_quantity < quantity) {
-    return NextResponse.json({ error: "Not enough stock" }, { status: 400 })
-  }
-
-  const total = Number(inv.final_price) * Number(quantity)
-
-  // Player gold check/deduct unless DM
-  if (!isDM) {
-    // upsert players_gold row if needed
-    const { data: pg } = await supabase
-      .from("players_gold")
-      .select("id, gold_amount")
-      .eq("player_id", userId)
-      .eq("campaign_id", campaign.id)
-      .maybeSingle()
-
-    const currentGold = Number(pg?.gold_amount ?? 0)
-    if (currentGold < total) {
-      return NextResponse.json({ error: "Insufficient gold" }, { status: 400 })
+    const isDM = camp.dm_id === userId
+    if (!isDM && !camp.access_enabled) {
+      return NextResponse.json({ error: "Shop access disabled by DM" }, { status: 403 })
     }
-    const newGold = Math.round((currentGold - total) * 100) / 100
 
-    const upsert = {
-      player_id: userId,
-      campaign_id: campaign.id,
-      gold_amount: newGold,
-      updated_at: new Date().toISOString(),
-      id: pg?.id,
+    if (inv.stock_quantity < qty) {
+      return NextResponse.json({ error: "Insufficient stock" }, { status: 400 })
     }
-    const { error: gErr } = pg?.id
-      ? await supabase.from("players_gold").update(upsert).eq("id", pg.id)
-      : await supabase.from("players_gold").insert(upsert)
-    if (gErr) return NextResponse.json({ error: "Failed to update gold" }, { status: 500 })
-  }
 
-  // Update stock
-  const newQty = inv.stock_quantity - quantity
-  const { error: uErr } = await supabase.from("shop_inventory").update({ stock_quantity: newQty }).eq("id", inv.id)
-  if (uErr) return NextResponse.json({ error: "Failed to update inventory" }, { status: 500 })
+    const priceEach = Number(inv.final_price)
+    const total = priceEach * qty
 
-  // Record transaction
-  const { error: tErr } = await supabase.from("shop_transactions").insert({
-    shopkeeper_id: shop.id,
-    player_id: userId,
-    item_name: inv.item_name,
-    quantity,
-    price_each: inv.final_price,
-    total_price: total,
-    transaction_type: "purchase",
-  })
-  if (tErr) console.error("transaction insert failed", tErr)
+    // If player (not DM), verify and deduct gold
+    if (!isDM) {
+      const { data: goldRow } = await supabase
+        .from("players_gold")
+        .select("id, gold_amount")
+        .eq("player_id", userId)
+        .eq("campaign_id", campaignId)
+        .single()
 
-  // Activity message (if sessionId provided)
-  if (sessionId) {
-    const content = `🛍️ [SHOP] Purchase: ${quantity} x ${inv.item_name} from ${shop.name} for ${total} gp.`
-    try {
-      await supabase.from("messages").insert({
-        session_id: sessionId,
-        campaign_id: campaign.id,
-        user_id: userId,
-        content,
+      const current = Number(goldRow?.gold_amount ?? 0)
+      if (current < total) {
+        return NextResponse.json({ error: "Not enough gold" }, { status: 400 })
+      }
+
+      const { error: gErr } = await supabase.from("players_gold").upsert({
+        id: goldRow?.id,
+        player_id: userId,
+        campaign_id: campaignId,
+        gold_amount: current - total,
+        updated_at: new Date().toISOString(),
       })
-    } catch (e) {
-      console.warn("Failed to insert activity message:", e)
+      if (gErr) return NextResponse.json({ error: "Failed to deduct gold" }, { status: 500 })
     }
-  }
 
-  return NextResponse.json({ ok: true, remaining_stock: newQty })
+    // Update stock
+    const { error: uErr } = await supabase
+      .from("shop_inventory")
+      .update({ stock_quantity: inv.stock_quantity - qty })
+      .eq("id", inventoryId)
+    if (uErr) return NextResponse.json({ error: "Failed to update stock" }, { status: 500 })
+
+    // Record transaction
+    const { error: tErr } = await supabase.from("shop_transactions").insert({
+      shopkeeper_id: inv.shopkeeper_id,
+      player_id: userId,
+      item_name: inv.item_name,
+      quantity: qty,
+      price_each: priceEach,
+      total_price: total,
+      transaction_type: "purchase",
+    })
+    if (tErr) {
+      // non-fatal
+      console.error("shop_transactions insert failed", tErr)
+    }
+
+    // Activity log (best-effort; ignore errors)
+    if (sessionId) {
+      try {
+        await supabase.from("messages").insert({
+          session_id: sessionId,
+          content: `🛍️ [SHOP] ${qty}x ${inv.item_name} purchased for ${total} gp`,
+          role: "system",
+          created_at: new Date().toISOString(),
+        })
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    return NextResponse.json({ ok: true })
+  } catch (e: any) {
+    console.error(e)
+    return NextResponse.json({ error: e?.message || "Internal error" }, { status: 500 })
+  }
 }

@@ -2,12 +2,11 @@
  * Shopkeeper and inventory generator.
  * Generates at least 5 items with realistic counts and prices locked-in.
  */
-
-import { type ShopType, pickCatalog, clampTo5Percent, type CatalogItem } from "./pricing"
+import { type ShopType, pickCatalog, clampTo5Percent, type CatalogItem, type Rarity } from "./pricing"
 
 export type GeneratedItem = {
   item_name: string
-  rarity: "common" | "uncommon" | "rare" | "wondrous" | "legendary"
+  rarity: Rarity
   base_price: number
   price_adjustment_percent: number
   final_price: number
@@ -133,7 +132,7 @@ function randomDescription(type: ShopType): string {
   return `${pick(base)}; ${aboutShop}.`
 }
 
-function stockForRarity(r: string): number {
+function stockForRarity(r: Rarity): number {
   switch (r) {
     case "common":
       return Math.floor(5 + Math.random() * 8) // 5-12

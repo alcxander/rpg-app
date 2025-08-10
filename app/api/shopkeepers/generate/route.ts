@@ -17,40 +17,49 @@ function pick<T>(arr: T[]): T {
 }
 
 export async function POST(req: NextRequest) {
-  try {
-    const { userId } = auth()
-    if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  const { userId } = auth()
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
+  try {
     const { campaignId, count = 5 } = await req.json()
     if (!campaignId) return NextResponse.json({ error: "campaignId required" }, { status: 400 })
 
     const supabase = createClient()
 
-    // Verify owner (DM)
+    // Verify DM ownership by dm_id
     const { data: campaign, error: cErr } = await supabase
       .from("campaigns")
-      .select("id, owner_id")
+      .select("id, name, dm_id")
       .eq("id", campaignId)
       .single()
+
     if (cErr || !campaign) return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
-    if (campaign.owner_id !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    if (campaign.dm_id !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
-    const generated = generateShopkeepers(Math.max(5, Math.min(20, Number(count) || 5)))
+    const howMany = Math.max(5, Math.min(20, Number(count) || 5))
+    const generated = generateShopkeepers(howMany)
 
-    const out: any[] = []
+    const created: any[] = []
+
     for (const g of generated) {
-      // Try generate image
-      const prompt = `Portrait token, ${g.race} shopkeeper, ${g.description}.`
+      // Attempt image
+      const prompt = `Portrait token of a ${g.race} ${g.shop_type} shopkeeper, ${g.description}`
       const imageUrl = (await generateTokenImage(prompt)) || pick(ENEMY_FALLBACKS)
 
       // Save token
       const { data: token, error: tErr } = await supabase
         .from("tokens")
-        .insert({ type: "shopkeeper", image_url: imageUrl, description: prompt, campaign_id: campaignId })
+        .insert({
+          type: "shopkeeper",
+          image_url: imageUrl,
+          description: prompt,
+          campaign_id: campaignId,
+        })
         .select("id, image_url")
         .single()
+
       if (tErr) {
-        // even if token insert fails, continue with null token and fallback shown by client
+        // continue with null
         console.error("Token insert failed", tErr)
       }
 
@@ -68,7 +77,7 @@ export async function POST(req: NextRequest) {
           shop_type: g.shop_type,
           token_id: token?.id ?? null,
         })
-        .select("id, name, shop_type, token_id")
+        .select("id, name, shop_type, token_id, created_at")
         .single()
 
       if (sErr || !shop) {
@@ -76,25 +85,28 @@ export async function POST(req: NextRequest) {
         continue
       }
 
-      // Save inventory
-      const invRows = g.items.map((it) => ({
-        shopkeeper_id: shop.id,
-        item_name: it.item_name,
-        rarity: it.rarity,
-        base_price: it.base_price,
-        price_adjustment_percent: it.price_adjustment_percent,
-        final_price: it.final_price,
-        stock_quantity: it.stock_quantity,
-      }))
-      const { error: iErr } = await supabase.from("shop_inventory").insert(invRows)
-      if (iErr) console.error("Inventory insert failed", iErr)
+      // Save inventory rows
+      if (g.items.length) {
+        const invRows = g.items.map((it) => ({
+          shopkeeper_id: shop.id,
+          item_name: it.item_name,
+          rarity: it.rarity,
+          base_price: it.base_price,
+          price_adjustment_percent: it.price_adjustment_percent,
+          final_price: it.final_price,
+          stock_quantity: it.stock_quantity,
+        }))
+        const { error: iErr } = await supabase.from("shop_inventory").insert(invRows)
+        if (iErr) console.error("Inventory insert failed", iErr)
+      }
 
-      out.push({ ...shop, image_url: token?.image_url ?? imageUrl })
+      created.push({ ...shop, image_url: token?.image_url ?? imageUrl })
     }
 
-    return NextResponse.json({ ok: true, created: out })
+    return NextResponse.json({ ok: true, created })
   } catch (e: any) {
     console.error(e)
-    return NextResponse.json({ error: e.message || "Server error" }, { status: 500 })
+    // Always return JSON
+    return NextResponse.json({ error: e?.message || "Internal server error" }, { status: 500 })
   }
 }

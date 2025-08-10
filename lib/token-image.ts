@@ -1,45 +1,37 @@
 /**
- * Reusable token image generation using Stability AI.
- * Returns a data URL (small 256x256 PNG) to store directly in DB for portability.
- * If generation fails, returns null and caller must use a fallback.
+ * Small, reusable token image generator via Stability AI.
+ * Returns a data URL (PNG) on success, or null on failure.
+ * Keep prompts concise to reduce cost.
  */
 export async function generateTokenImage(prompt: string): Promise<string | null> {
-  const key = process.env.STABILITY_API_KEY
-  if (!key) {
-    console.warn("STABILITY_API_KEY not set; skipping image generation.")
-    return null
-  }
-
   try {
-    // v2beta stable-image core: efficient, small image
-    const endpoint = "https://api.stability.ai/v2beta/stable-image/generate/core"
+    const apiKey = process.env.STABILITY_API_KEY
+    if (!apiKey) return null
+
     const form = new FormData()
     form.append("prompt", prompt)
-    form.append("aspect_ratio", "1:1")
     form.append("output_format", "png")
-    // Keep cost down: no high-res / upscaling
+    form.append("aspect_ratio", "1:1")
+    form.append("width", "256")
+    form.append("height", "256")
 
-    const res = await fetch(endpoint, {
+    const res = await fetch("https://api.stability.ai/v2beta/stable-image/generate/core", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${key}`,
-        Accept: "image/png",
+        Authorization: `Bearer ${apiKey}`,
       },
       body: form,
     })
 
     if (!res.ok) {
-      const errText = await res.text().catch(() => "")
-      console.error("Stability image generation failed:", res.status, errText)
+      // Avoid throwing; just gracefully degrade
       return null
     }
 
-    const arrayBuf = await res.arrayBuffer()
-    const bytes = Buffer.from(arrayBuf).toString("base64")
-    const dataUrl = `data:image/png;base64,${bytes}`
-    return dataUrl
-  } catch (err) {
-    console.error("generateTokenImage error:", err)
+    const buffer = await res.arrayBuffer()
+    const base64 = Buffer.from(buffer).toString("base64")
+    return `data:image/png;base64,${base64}`
+  } catch {
     return null
   }
 }

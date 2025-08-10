@@ -6,27 +6,28 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const { userId } = auth()
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
+  const campaignId = params.id
+  const { access_enabled } = await req.json()
+
   const supabase = createClient()
-  const id = params.id
 
-  const { data: campaign, error } = await supabase
+  const { data: camp, error: cErr } = await supabase
     .from("campaigns")
-    .select("id, owner_id, access_enabled")
-    .eq("id", id)
+    .select("id, dm_id, access_enabled, name")
+    .eq("id", campaignId)
     .single()
-  if (error || !campaign) return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
-  if (campaign.owner_id !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
-  const body = await req.json().catch(() => ({}))
-  const enabled = Boolean(body?.access_enabled)
+  if (cErr || !camp) return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
+  if (camp.dm_id !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
   const { data: updated, error: uErr } = await supabase
     .from("campaigns")
-    .update({ access_enabled: enabled })
-    .eq("id", id)
-    .select("id, access_enabled")
+    .update({ access_enabled: Boolean(access_enabled) })
+    .eq("id", campaignId)
+    .select("id, name, access_enabled")
     .single()
 
   if (uErr) return NextResponse.json({ error: "Failed to update" }, { status: 500 })
+
   return NextResponse.json({ ok: true, campaign: updated })
 }

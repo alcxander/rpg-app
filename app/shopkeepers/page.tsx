@@ -10,7 +10,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useToast } from "@/hooks/use-toast"
-import { Plus, RefreshCw, ToggleRight, Coins, ShoppingCart, Shield, Loader2 } from "lucide-react"
+import { Plus, RefreshCw, ToggleRight, Coins, ShoppingCart, Shield, Loader2, Home } from "lucide-react"
+import { useRouter } from "next/navigation"
 
 type CampaignOption = { id: string; name: string; access_enabled?: boolean; owner_id?: string }
 
@@ -39,6 +40,7 @@ type Shopkeeper = {
 }
 
 export default function ShopkeepersPage() {
+  const router = useRouter()
   const { user, isLoaded, isSignedIn } = useUser()
   const { toast } = useToast()
   const [campaigns, setCampaigns] = useState<CampaignOption[]>([])
@@ -55,18 +57,20 @@ export default function ShopkeepersPage() {
   useEffect(() => {
     if (!isLoaded || !isSignedIn) return
     ;(async () => {
-      const res = await fetch("/api/campaigns")
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
+      try {
+        const res = await fetch("/api/campaigns")
+        // Ensure JSON parse only if response is JSON
+        const data = await res.json()
+        if (!res.ok) throw new Error(data?.error || "Failed to load campaigns")
+        setCampaigns(data.campaigns || [])
+        if (!selectedCampaignId && data.campaigns?.[0]?.id) setSelectedCampaignId(data.campaigns[0].id)
+      } catch (e: any) {
         toast({
           title: "Failed to load campaigns",
-          description: data?.error,
+          description: e.message,
           variant: "destructive",
           className: "bg-red-600 text-white",
         })
-      } else {
-        setCampaigns(data.campaigns || [])
-        if (!selectedCampaignId && data.campaigns?.[0]?.id) setSelectedCampaignId(data.campaigns[0].id)
       }
     })()
   }, [isLoaded, isSignedIn]) // eslint-disable-line
@@ -233,6 +237,15 @@ export default function ShopkeepersPage() {
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold text-purple-400">Shopkeepers</h1>
           <div className="flex gap-2">
+            <Button
+              onClick={() => router.push("/")}
+              variant="secondary"
+              className="bg-gray-800 border border-gray-700 text-white"
+              title="Go Home"
+            >
+              <Home className="w-4 h-4 mr-2" /> Home
+            </Button>
+
             <Select value={selectedCampaignId || ""} onValueChange={(v) => setSelectedCampaignId(v)}>
               <SelectTrigger className="bg-gray-800 border-gray-700 text-white w-64">
                 <SelectValue placeholder="Select campaign" />
@@ -254,7 +267,7 @@ export default function ShopkeepersPage() {
             />
 
             <Button
-              onClick={() => loadShopkeepers(selectedCampaignId!)}
+              onClick={() => selectedCampaignId && loadShopkeepers(selectedCampaignId)}
               variant="secondary"
               className="bg-gray-800 border border-gray-700 text-white"
             >
@@ -276,7 +289,34 @@ export default function ShopkeepersPage() {
                 <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading shopkeepers...
               </div>
             ) : shopkeepers.length === 0 ? (
-              <p className="text-gray-400">No shopkeepers. {isOwner ? "Generate some in Management." : ""}</p>
+              <div className="flex flex-col items-start gap-3 text-gray-400">
+                <p>No shopkeepers.</p>
+                {isOwner && (
+                  <div className="flex items-center gap-2">
+                    <Label className="text-gray-300">Generate count</Label>
+                    <Input
+                      type="number"
+                      min={5}
+                      max={20}
+                      value={count}
+                      onChange={(e) => setCount(Number.parseInt(e.target.value || "5", 10))}
+                      className="w-24 bg-gray-900 border-gray-700 text-white"
+                    />
+                    <Button
+                      onClick={onGenerate}
+                      className="bg-purple-600 hover:bg-purple-700 text-white"
+                      disabled={generating || !selectedCampaignId}
+                    >
+                      {generating ? (
+                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                      ) : (
+                        <Plus className="w-4 h-4 mr-2" />
+                      )}{" "}
+                      Generate Shopkeepers
+                    </Button>
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {shopkeepers.map((sk) => (
@@ -595,31 +635,34 @@ function PlayersGoldEditor({
     if (!campaignId) return
     setLoading(true)
     ;(async () => {
-      // Load participants and gold
-      const resSessions = await fetch(`/api/sessions?campaignId=${encodeURIComponent(campaignId)}`)
-      const sData = await resSessions.json().catch(() => ({}))
-      const participants = new Map<string, { name?: string }>()
-      for (const s of sData.sessions || []) {
-        const arr = Array.isArray(s.participants) ? s.participants : []
-        for (const p of arr) {
-          const id = String(p?.userId)
-          if (!participants.has(id)) participants.set(id, { name: p?.name })
+      try {
+        // Load sessions to discover participants (best-effort)
+        const resSessions = await fetch(`/api/sessions?campaignId=${encodeURIComponent(campaignId)}`)
+        const sData = await resSessions.json().catch(() => ({}))
+        const participants = new Map<string, { name?: string }>()
+        for (const s of sData.sessions || []) {
+          const arr = Array.isArray(s.participants) ? s.participants : []
+          for (const p of arr) {
+            const id = String(p?.userId)
+            if (!participants.has(id)) participants.set(id, { name: p?.name })
+          }
         }
-      }
-      const resGold = await fetch(`/api/players/gold?campaignId=${encodeURIComponent(campaignId)}`).catch(() => null)
-      const goldMap = new Map<string, number>()
-      if (resGold && resGold.ok) {
+        const resGold = await fetch(`/api/players/gold?campaignId=${encodeURIComponent(campaignId)}`)
         const gData = await resGold.json().catch(() => ({}))
+        const goldMap = new Map<string, number>()
         for (const g of gData.rows || []) {
           goldMap.set(String(g.player_id), Number(g.gold_amount || 0))
         }
+        const list: { player_id: string; name?: string; gold_amount: number }[] = []
+        for (const [id, info] of participants.entries()) {
+          list.push({ player_id: id, name: info.name, gold_amount: goldMap.get(id) ?? 0 })
+        }
+        setRows(list)
+      } catch {
+        // ignore
+      } finally {
+        setLoading(false)
       }
-      const list: { player_id: string; name?: string; gold_amount: number }[] = []
-      for (const [id, info] of participants.entries()) {
-        list.push({ player_id: id, name: info.name, gold_amount: goldMap.get(id) ?? 0 })
-      }
-      setRows(list)
-      setLoading(false)
     })()
   }, [campaignId])
 

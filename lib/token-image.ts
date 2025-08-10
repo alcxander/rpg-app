@@ -5,7 +5,6 @@
  */
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  // Browser-safe fallback when Buffer is not available
   if (typeof Buffer !== "undefined") {
     return Buffer.from(buffer).toString("base64")
   }
@@ -18,7 +17,6 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
       bytes.subarray(i, i + chunk) as unknown as number[],
     )
   }
-  // btoa is available in browsers
   return typeof btoa !== "undefined" ? btoa(binary) : ""
 }
 
@@ -52,7 +50,6 @@ export async function generateTokenImage(prompt: string): Promise<string | null>
     if (!res.ok) {
       let errText = ""
       try {
-        // clone in case body was read earlier
         const clone = res.clone()
         errText = await clone.text()
       } catch {

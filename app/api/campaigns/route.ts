@@ -12,25 +12,25 @@ export async function GET(req: NextRequest) {
   const t0 = Date.now()
   const reqId = rid()
 
-  // Auth (using getAuth(req) is the most reliable inside Route Handlers)
+  // Robust auth retrieval for Route Handlers
   const { userId, sessionId } = getAuth(req)
   const cookieLen = (req.headers.get("cookie") || "").length
-  const authz = req.headers.get("authorization")
-  console.log("[api/campaigns] GET start", { reqId, hasUser: !!userId, sessionId, cookieLen, hasAuthz: !!authz })
+  const hasAuthz = !!req.headers.get("authorization")
+  console.log("[api/campaigns] GET start", { reqId, hasUser: !!userId, sessionId, cookieLen, hasAuthz })
 
   if (!userId) {
-    console.warn("[api/campaigns] unauthorized", { reqId })
+    console.warn("[api/campaigns] GET unauthorized", { reqId })
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
   const supabase = createAdminClient()
 
   try {
-    // 1) Campaigns owned by user (owner_id is canonical; dm_id kept as fallback)
+    // 1) Campaigns owned by user (canonical field: owner_id)
     const { data: owned, error: ownedErr } = await supabase
       .from("campaigns")
-      .select("id,name,owner_id,dm_id,access_enabled,created_at")
-      .or(`owner_id.eq.${userId},dm_id.eq.${userId}`)
+      .select("id,name,owner_id,access_enabled,created_at")
+      .eq("owner_id", userId)
       .order("created_at", { ascending: false })
 
     console.log("[api/campaigns] owned result", {
@@ -39,43 +39,80 @@ export async function GET(req: NextRequest) {
       error: ownedErr?.message || null,
     })
 
-    // 2) Best-effort: campaigns where user appears in sessions.participants
-    //    This handles member access if your sessions store participant user IDs or objects.
-    let memberCampaigns: any[] = []
-    const { data: sessionsById, error: sessErrId } = await supabase
-      .from("sessions")
-      .select("campaign_id,participants")
-      .contains("participants", [userId] as any) // participants contains "userId" as a raw value
-    console.log("[api/campaigns] sessions contains userId", {
-      reqId,
-      count: sessionsById?.length ?? 0,
-      error: sessErrId?.message || null,
-    })
+    // 2) Best-effort membership via sessions.participants
+    //    We don't know the exact column type in your DB, so try a couple of safe strategies:
+    //    a) 'cs' with a JSON payload like [{ userId: "..." }] (used previously in your app)
+    //    b) fallback: 'cs' with just the userId string (if participants is an array of raw strings)
+    let participantCampaignIds: string[] = []
 
-    if (!sessErrId && sessionsById?.length) {
-      const ids = Array.from(new Set(sessionsById.map((s: any) => s.campaign_id).filter(Boolean)))
-      if (ids.length) {
-        const { data: member, error: memberErr } = await supabase
-          .from("campaigns")
-          .select("id,name,owner_id,dm_id,access_enabled,created_at")
-          .in("id", ids)
-        console.log("[api/campaigns] member campaigns", {
+    // Strategy a)
+    try {
+      const containsValue = JSON.stringify([{ userId }])
+      const sessionsRes = await supabase
+        .from("sessions")
+        .select("campaign_id")
+        .filter("participants", "cs", containsValue)
+
+      console.log("[api/campaigns] sessions (strategy a)", {
+        reqId,
+        count: sessionsRes.data?.length ?? 0,
+        error: sessionsRes.error?.message || null,
+      })
+
+      if (!sessionsRes.error && sessionsRes.data?.length) {
+        participantCampaignIds = sessionsRes.data.map((s: any) => s.campaign_id).filter(Boolean)
+      } else {
+        // Strategy b)
+        const sessionsResB = await supabase
+          .from("sessions")
+          .select("campaign_id")
+          .filter("participants", "cs", JSON.stringify([userId]))
+
+        console.log("[api/campaigns] sessions (strategy b)", {
           reqId,
-          count: member?.length ?? 0,
-          error: memberErr?.message || null,
+          count: sessionsResB.data?.length ?? 0,
+          error: sessionsResB.error?.message || null,
         })
-        memberCampaigns = member || []
+
+        if (!sessionsResB.error && sessionsResB.data?.length) {
+          participantCampaignIds = sessionsResB.data.map((s: any) => s.campaign_id).filter(Boolean)
+        }
       }
+    } catch (e: any) {
+      console.warn("[api/campaigns] sessions query exception", { reqId, message: e?.message })
     }
 
-    // Merge unique by id
-    const map = new Map<string, any>()
-    for (const c of owned || []) map.set(c.id, c)
-    for (const c of memberCampaigns) map.set(c.id, c)
-    const campaigns = Array.from(map.values())
+    const ownedIds = (owned || []).map((c) => c.id)
+    const uniqueIds = Array.from(new Set<string>([...ownedIds, ...participantCampaignIds])).filter(Boolean)
 
-    console.log("[api/campaigns] GET done", { reqId, total: campaigns.length, ms: Date.now() - t0 })
-    return NextResponse.json({ campaigns })
+    // If no membership campaigns resolved, return owned immediately to avoid an extra query
+    if (uniqueIds.length === 0) {
+      console.log("[api/campaigns] GET done (owned only)", {
+        reqId,
+        total: owned?.length ?? 0,
+        ms: Date.now() - t0,
+      })
+      return NextResponse.json({ campaigns: owned || [] })
+    }
+
+    // Merge owned + member campaigns
+    const { data: campaigns, error: memberErr } = await supabase
+      .from("campaigns")
+      .select("id,name,owner_id,access_enabled,created_at")
+      .in("id", uniqueIds)
+
+    console.log("[api/campaigns] merged result", {
+      reqId,
+      total: campaigns?.length ?? 0,
+      error: memberErr?.message || null,
+      ms: Date.now() - t0,
+    })
+
+    if (memberErr) {
+      return NextResponse.json({ error: memberErr.message }, { status: 500 })
+    }
+
+    return NextResponse.json({ campaigns: campaigns || [] })
   } catch (e: any) {
     console.error("[api/campaigns] GET exception", {
       reqId,
@@ -89,16 +126,16 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const t0 = Date.now()
   const reqId = rid()
+
   const { userId, sessionId } = getAuth(req)
-  const cookieLen = (req.headers.get("cookie") || "").length
-  console.log("[api/campaigns] POST start", { reqId, hasUser: !!userId, sessionId, cookieLen })
+  console.log("[api/campaigns] POST start", { reqId, hasUser: !!userId, sessionId })
 
   if (!userId) {
     console.warn("[api/campaigns] POST unauthorized", { reqId })
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  let body: any = null
+  let body: any
   try {
     body = await req.json()
   } catch (e: any) {

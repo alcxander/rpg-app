@@ -1,8 +1,8 @@
 /**
  * Server-side Supabase clients for Route Handlers and Server Actions.
  *
- * - createAdminClient(): Uses the service role key. Never import into client components.
- * - createServerSupabaseClient(clerkSessionToken): RLS-aware client scoped to a user.
+ * - createAdminClient(): Uses the service role key (bypasses RLS). Never import into client components.
+ * - createServerSupabaseClient(clerkSessionToken): RLS-aware client scoped to a user via Clerk session token.
  *
  * Backwards compatibility:
  * - export { createClient } as alias to createAdminClient, because some existing routes
@@ -12,22 +12,22 @@ import { createClient as supabaseCreateClient, type SupabaseClient } from "@supa
 
 type AnyClient = SupabaseClient<any, any, any>
 
-function requireEnv(name: string, value?: string | null): string {
-  if (!value) {
+function requireEnv(name: string, val?: string | null): string {
+  if (!val) {
     console.error(`[supabaseAdmin] Missing env var: ${name}`)
     throw new Error(`Missing environment variable: ${name}`)
   }
-  return value
+  return val
 }
 
 /**
  * Admin client (bypasses RLS) - for privileged server mutations.
  */
 export function createAdminClient(): AnyClient {
-  // Keep compatibility with both SUPABASE_URL and NEXT_PUBLIC_SUPABASE_URL in server envs.
+  // Prefer server vars, but support NEXT_PUBLIC_* for environments that only expose those.
   const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  const finalUrl = requireEnv("SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL", url)
+  const finalUrl = requireEnv("SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL", url)
   const finalKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY", serviceKey)
 
   const client = supabaseCreateClient(finalUrl, finalKey, {
@@ -43,8 +43,8 @@ export function createAdminClient(): AnyClient {
 export function createServerSupabaseClient(clerkSessionToken: string): AnyClient {
   const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
   const anon = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  const finalUrl = requireEnv("SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL", url)
-  const finalAnon = requireEnv("SUPABASE_ANON_KEY/NEXT_PUBLIC_SUPABASE_ANON_KEY", anon)
+  const finalUrl = requireEnv("SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL", url)
+  const finalAnon = requireEnv("SUPABASE_ANON_KEY or NEXT_PUBLIC_SUPABASE_ANON_KEY", anon)
 
   const client = supabaseCreateClient(finalUrl, finalAnon, {
     auth: { persistSession: false, autoRefreshToken: false },

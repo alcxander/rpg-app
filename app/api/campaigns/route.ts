@@ -1,84 +1,59 @@
-import { NextResponse } from "next/server"
+import { NextResponse, type NextRequest } from "next/server"
 import { auth } from "@clerk/nextjs/server"
-import { createServerSupabaseClient } from "@/lib/supabaseAdmin"
+import { createAdminClient } from "@/lib/supabaseAdmin"
 
-export const runtime = "nodejs"
+export async function GET(_req: NextRequest) {
+  const t0 = Date.now()
+  const { userId } = auth()
+  const reqId = Math.random().toString(36).slice(2, 8)
+  console.log("[api/campaigns] GET start", { reqId, userId })
 
-export async function GET() {
-  const { userId, getToken } = await auth()
-  if (!userId || !getToken) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-
-  // Use Clerk -> Supabase JWT so RLS and policies apply correctly
-  const token = await getToken({ template: "supabase" })
-  if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-
-  const supabase = createServerSupabaseClient(token)
-
-  console.log("[api/campaigns] GET for user", userId)
-
-  // Campaigns the user owns (original behavior)
-  const owned = await supabase.from("campaigns").select("id, name, updated_at").eq("owner_id", userId)
-  if (owned.error) {
-    console.error("[api/campaigns] owned error:", owned.error.message)
-    return NextResponse.json({ error: owned.error.message }, { status: 500 })
+  if (!userId) {
+    console.warn("[api/campaigns] unauthorized", { reqId })
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  // Campaigns where user participates in any session (original behavior)
-  let participantCampaignIds: string[] = []
+  const supabase = createAdminClient()
+
   try {
-    // Use 'cs' (contains) explicitly with a stringified JSON so PostgREST parses it
-    const containsValue = JSON.stringify([{ userId }])
-    const sessionsRes = await supabase
+    // Owned campaigns
+    const { data: owned, error: ownedErr } = await supabase
+      .from("campaigns")
+      .select("id,name,dm_id,access_enabled,created_at")
+      .eq("dm_id", userId)
+      .order("created_at", { ascending: false })
+    console.log("[api/campaigns] owned", { reqId, count: owned?.length ?? 0, ownedErr })
+
+    // Campaigns via sessions membership (best-effort if sessions table exists)
+    let memberCampaigns: any[] = []
+    const { data: sessions, error: sessErr } = await supabase
       .from("sessions")
-      .select("campaign_id")
-      .filter("participants", "cs", containsValue)
+      .select("id,campaign_id,participants")
+      .contains("participants", [userId] as any) // participants is expected to be a JSON array
+    console.log("[api/campaigns] sessions", { reqId, count: sessions?.length ?? 0, sessErr })
 
-    if (!sessionsRes.error) {
-      participantCampaignIds = (sessionsRes.data || []).map((s: any) => s.campaign_id).filter(Boolean)
-    } else {
-      console.warn("[api/campaigns] sessions contains failed; continuing with owned only:", sessionsRes.error.message)
+    if (!sessErr && sessions && sessions.length) {
+      const ids = Array.from(new Set(sessions.map((s) => s.campaign_id).filter(Boolean)))
+      if (ids.length) {
+        const { data: member, error: memberErr } = await supabase
+          .from("campaigns")
+          .select("id,name,dm_id,access_enabled,created_at")
+          .in("id", ids)
+        console.log("[api/campaigns] member campaigns", { reqId, count: member?.length ?? 0, memberErr })
+        memberCampaigns = member || []
+      }
     }
+
+    // Merge unique by id
+    const map = new Map<string, any>()
+    for (const c of owned || []) map.set(c.id, c)
+    for (const c of memberCampaigns) map.set(c.id, c)
+    const campaigns = Array.from(map.values())
+
+    console.log("[api/campaigns] done", { reqId, total: campaigns.length, ms: Date.now() - t0 })
+    return NextResponse.json({ campaigns })
   } catch (e: any) {
-    console.warn("[api/campaigns] sessions contains threw; continuing with owned only:", e?.message || e)
+    console.error("[api/campaigns] exception", { reqId, message: e?.message, stack: e?.stack })
+    return NextResponse.json({ error: e?.message || "Internal Server Error" }, { status: 500 })
   }
-
-  const campaignIds = Array.from(new Set([...(owned.data || []).map((c) => c.id), ...participantCampaignIds]))
-
-  if (campaignIds.length === 0) {
-    return NextResponse.json({ campaigns: owned.data || [] })
-  }
-
-  const campaigns = await supabase.from("campaigns").select("id, name, updated_at").in("id", campaignIds)
-  if (campaigns.error) {
-    console.error("[api/campaigns] campaigns error:", campaigns.error.message)
-    return NextResponse.json({ error: campaigns.error.message }, { status: 500 })
-  }
-
-  return NextResponse.json({ campaigns: campaigns.data })
-}
-
-export async function POST(req: Request) {
-  const { userId, getToken } = await auth()
-  if (!userId || !getToken) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-
-  const token = await getToken({ template: "supabase" })
-  if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-
-  const body = await req.json()
-  const name = String(body?.name || "").trim()
-  if (!name) return NextResponse.json({ error: "Name is required" }, { status: 400 })
-
-  const supabase = createServerSupabaseClient(token)
-  const { data, error } = await supabase
-    .from("campaigns")
-    .insert({ name, owner_id: userId, settings: { members: [] } })
-    .select("id, name")
-    .single()
-
-  if (error) {
-    console.error("[api/campaigns] POST error:", error.message)
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-  console.log("[api/campaigns] Created campaign", data?.id)
-  return NextResponse.json({ campaign: data })
 }

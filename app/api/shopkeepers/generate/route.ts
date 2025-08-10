@@ -23,49 +23,54 @@ function rid() {
 export async function POST(req: NextRequest) {
   const { userId } = auth()
   const reqId = rid()
-  console.log("[shopkeepers.generate] request start", { reqId, userId })
+  const t0 = Date.now()
+  console.log("[api/shopkeepers.generate] start", { reqId, userId })
 
   if (!userId) {
-    console.warn("[shopkeepers.generate] unauthorized", { reqId })
+    console.warn("[api/shopkeepers.generate] unauthorized", { reqId })
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
   try {
-    const body = await req.json().catch(() => ({}))
+    const raw = await req.text()
+    console.log("[api/shopkeepers.generate] raw body", { reqId, rawLen: raw.length })
+    const body = raw ? JSON.parse(raw) : {}
     const campaignId = body?.campaignId
     const count = Number(body?.count ?? 5)
-    console.log("[shopkeepers.generate] parsed body", { reqId, campaignId, count })
+    console.log("[api/shopkeepers.generate] parsed body", { reqId, campaignId, count })
 
     if (!campaignId) {
-      console.warn("[shopkeepers.generate] missing campaignId", { reqId })
+      console.warn("[api/shopkeepers.generate] missing campaignId", { reqId })
       return NextResponse.json({ error: "campaignId required" }, { status: 400 })
     }
 
     const supabase = createAdminClient()
-    console.log("[shopkeepers.generate] checking campaign", { reqId, campaignId })
 
+    // Check DM
     const { data: campaign, error: cErr } = await supabase
       .from("campaigns")
-      .select("id, name, dm_id, access_enabled")
+      .select("id,name,dm_id,access_enabled")
       .eq("id", campaignId)
       .single()
+    console.log("[api/shopkeepers.generate] campaign", { reqId, cErr, campaignId, dm_id: campaign?.dm_id })
 
-    console.log("[shopkeepers.generate] campaign query result", { reqId, cErr, campaign })
     if (cErr || !campaign) {
       return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
     }
     if (campaign.dm_id !== userId) {
-      console.warn("[shopkeepers.generate] forbidden (not DM)", { reqId, userId, dm_id: campaign.dm_id })
+      console.warn("[api/shopkeepers.generate] forbidden (not DM)", { reqId, userId, dm_id: campaign.dm_id })
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
     const howMany = Math.max(5, Math.min(20, isFinite(count) ? count : 5))
-    console.log("[shopkeepers.generate] generating", { reqId, howMany })
+    console.log("[api/shopkeepers.generate] generating", { reqId, howMany })
     const generated = generateShopkeepers(howMany)
 
     const created: any[] = []
-    for (const [idx, g] of generated.entries()) {
-      console.log("[shopkeepers.generate] begin shopkeeper", {
+    let idx = 0
+    for (const g of generated) {
+      const loopStart = Date.now()
+      console.log("[api/shopkeepers.generate] loop begin", {
         reqId,
         idx,
         name: g.name,
@@ -73,13 +78,18 @@ export async function POST(req: NextRequest) {
         items: g.items.length,
       })
 
-      // Attempt image
+      // Image
       const prompt = `Portrait token of a ${g.race} ${g.shop_type} shopkeeper, ${g.description}`
-      console.log("[shopkeepers.generate] generate image", { reqId, idx, promptLen: prompt.length })
+      console.log("[api/shopkeepers.generate] image prompt", { reqId, idx, len: prompt.length })
       const imageUrl = (await generateTokenImage(prompt)) || pick(ENEMY_FALLBACKS)
-      console.log("[shopkeepers.generate] image resolved", { reqId, idx, usesFallback: !imageUrl.startsWith("data:") })
+      console.log("[api/shopkeepers.generate] image chosen", {
+        reqId,
+        idx,
+        isFallback: !imageUrl.startsWith("data:"),
+        urlPreview: imageUrl.substring(0, 30),
+      })
 
-      // Save token
+      // Token insert
       const { data: token, error: tErr } = await supabase
         .from("tokens")
         .insert({
@@ -88,11 +98,11 @@ export async function POST(req: NextRequest) {
           description: prompt,
           campaign_id: campaignId,
         })
-        .select("id, image_url")
+        .select("id,image_url")
         .single()
-      console.log("[shopkeepers.generate] token insert", { reqId, idx, tErr, token })
+      console.log("[api/shopkeepers.generate] token insert", { reqId, idx, tErr, tokenId: token?.id })
 
-      // Save shopkeeper
+      // Shopkeeper insert
       const { data: shop, error: sErr } = await supabase
         .from("shopkeepers")
         .insert({
@@ -106,16 +116,17 @@ export async function POST(req: NextRequest) {
           shop_type: g.shop_type,
           token_id: token?.id ?? null,
         })
-        .select("id, name, shop_type, token_id, created_at")
+        .select("id,name,shop_type,token_id,created_at")
         .single()
-      console.log("[shopkeepers.generate] shopkeeper insert", { reqId, idx, sErr, shop })
+      console.log("[api/shopkeepers.generate] shopkeeper insert", { reqId, idx, sErr, shopId: shop?.id })
 
       if (sErr || !shop) {
-        console.error("[shopkeepers.generate] shopkeeper insert failed, skipping inventory", { reqId, idx, sErr })
+        console.error("[api/shopkeepers.generate] shopkeeper insert failed, skipping inventory", { reqId, idx, sErr })
+        idx++
         continue
       }
 
-      // Save inventory rows
+      // Inventory insert
       if (g.items.length) {
         const invRows = g.items.map((it) => ({
           shopkeeper_id: shop.id,
@@ -126,18 +137,24 @@ export async function POST(req: NextRequest) {
           final_price: it.final_price,
           stock_quantity: it.stock_quantity,
         }))
-        console.log("[shopkeepers.generate] inserting inventory", { reqId, idx, rows: invRows.length })
         const { error: iErr } = await supabase.from("shop_inventory").insert(invRows)
-        console.log("[shopkeepers.generate] inventory insert result", { reqId, idx, iErr })
+        console.log("[api/shopkeepers.generate] inventory insert", {
+          reqId,
+          idx,
+          rows: invRows.length,
+          iErr,
+        })
       }
 
       created.push({ ...shop, image_url: token?.image_url ?? imageUrl })
+      console.log("[api/shopkeepers.generate] loop end", { reqId, idx, ms: Date.now() - loopStart })
+      idx++
     }
 
-    console.log("[shopkeepers.generate] done", { reqId, created: created.length })
+    console.log("[api/shopkeepers.generate] done", { reqId, created: created.length, ms: Date.now() - t0 })
     return NextResponse.json({ ok: true, created })
   } catch (e: any) {
-    console.error("[shopkeepers.generate] exception", {
+    console.error("[api/shopkeepers.generate] exception", {
       reqId,
       message: e?.message,
       stack: e?.stack,

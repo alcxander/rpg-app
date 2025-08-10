@@ -1,15 +1,15 @@
 "use client"
 
-import { useRouter } from "next/navigation"
-
 import type React from "react"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
 import dynamic from "next/dynamic"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import {
   Dialog,
   DialogContent,
@@ -20,9 +20,24 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Loader2, Swords, Store, Send, Plus, UserPlus, Hammer, List } from "lucide-react"
+import {
+  Loader2,
+  Swords,
+  Gem,
+  Store,
+  MapIcon,
+  Send,
+  Plus,
+  UserPlus,
+  Copy,
+  Hammer,
+  Wand2,
+  List,
+  Sparkles,
+  Users,
+} from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { useUser, RedirectToSignIn } from "@clerk/nextjs"
+import { useUser, RedirectToSignIn, UserButton } from "@clerk/nextjs"
 import { useRealtimeSession } from "@/hooks/useRealtimeSession"
 import { useSessionChat } from "@/hooks/useSessionChat"
 import { parseCoordinate } from "@/lib/utils"
@@ -34,7 +49,6 @@ import { BattleForm } from "@/components/BattleForm"
 import LootForm from "@/components/LootForm"
 import Initiative from "@/components/Initiative"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Sparkles, Users, LayoutDashboard } from "lucide-react"
 
 const CanvasMap = dynamic(() => import("@/components/CanvasMap").then((m) => m.default), {
   ssr: false,
@@ -75,8 +89,6 @@ export default function HomePage() {
   const [llmResponseContent, setLlmResponseContent] = useState("")
   const [llmResponseTitle, setLlmResponseTitle] = useState("")
 
-  const [open, setOpen] = useState(false)
-
   const {
     sessionState,
     emitEvent,
@@ -92,6 +104,8 @@ export default function HomePage() {
   // Mobile overlays
   const [generatorsOpen, setGeneratorsOpen] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const [dmMenuOpen, setDmMenuOpen] = useState(false)
+  const [dmDialogOpen, setDmDialogOpen] = useState(false)
 
   // Token highlight
   const [highlightTokenId, setHighlightTokenId] = useState<string | null>(null)
@@ -316,7 +330,6 @@ export default function HomePage() {
     [sessionId, userId, toast, emitEvent, setSessionState],
   )
 
-  // Switch to a battle: apply its snapshot to the map and set chat log
   const onSelectBattle = (battleId: string) => {
     const b: any = sessionState.battles.find((x) => x.id === battleId) || null
     if (!b) return
@@ -466,8 +479,9 @@ export default function HomePage() {
       <div className="h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-6 text-center">
         <h1 className="text-2xl font-semibold mb-2">Setting up your account...</h1>
         <p className="text-gray-400 max-w-md mb-4">
-          We’re linking your profile to the game database, if you're seeing this sorry just gotta link your profile
-          across systems. It drops sometimes. You must exist in our database to use the app.
+          {
+            "We’re linking your profile to the game database, if you're seeing this sorry just gotta link your profile across systems. It drops sometimes. You must exist in our database to use the app."
+          }
         </p>
         {ensureUserError && <p className="text-red-400 text-sm mb-2">{ensureUserError}</p>}
         <Button onClick={() => location.reload()} className="bg-purple-600 hover:bg-purple-700 text-white">
@@ -483,6 +497,122 @@ export default function HomePage() {
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-purple-500">RPG Nexus</h1>
 
+          {/* Desktop DM Tools dropdown (existing quick actions) */}
+          <DropdownMenu open={dmMenuOpen} onOpenChange={setDmMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <button
+                onMouseEnter={() => setDmMenuOpen(true)}
+                onMouseLeave={() => setDmMenuOpen(false)}
+                className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-100 inline-flex items-center gap-2 hidden sm:inline-flex"
+              >
+                <Hammer className="w-4 h-4" /> DM Tools
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              onMouseEnter={() => setDmMenuOpen(true)}
+              onMouseLeave={() => setDmMenuOpen(false)}
+              className="bg-gray-800 text-white border-gray-700"
+            >
+              <DropdownMenuItem onClick={() => setShowBattleForm(true)} className="focus:bg-gray-700">
+                <Swords className="w-4 h-4 mr-2" /> Generate Battle
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setGeneratorsOpen(true)} className="focus:bg-gray-700">
+                <Wand2 className="w-4 h-4 mr-2" /> Generate Loot
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push("/shopkeepers")} className="focus:bg-gray-700">
+                <Store className="w-4 h-4 mr-2" /> Shopkeepers
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => router.push("/shopkeepers?autoGenerate=1")}
+                className="focus:bg-gray-700"
+              >
+                <Sparkles className="w-4 h-4 mr-2" /> Generate Shopkeepers Now
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled className="focus:bg-gray-700">
+                <Gem className="w-4 h-4 mr-2" /> Generate Loot (Soon)
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled className="focus:bg-gray-700">
+                <MapIcon className="w-4 h-4 mr-2" /> Generate Map (Soon)
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* New: DM Tools modal moved into the header (nice cards UI) */}
+          <Dialog open={dmDialogOpen} onOpenChange={setDmDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="hidden sm:inline-flex bg-purple-600 hover:bg-purple-700 text-white">
+                <Hammer className="w-4 h-4 mr-2" />
+                Open DM Tools
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="bg-gray-800 border border-gray-700 text-white">
+              <DialogHeader>
+                <DialogTitle className="text-purple-300">DM Tools</DialogTitle>
+                <DialogDescription className="text-gray-400">Quick actions for game masters</DialogDescription>
+              </DialogHeader>
+              <div className="grid sm:grid-cols-2 gap-3">
+                <Card className="bg-gray-800 border-gray-700">
+                  <CardHeader>
+                    <CardTitle className="text-gray-200 flex items-center gap-2">
+                      <Store className="w-4 h-4 text-purple-400" />
+                      Shopkeepers
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex gap-2">
+                    <Button
+                      className="bg-gray-900 border border-gray-700 text-white"
+                      onClick={() => {
+                        setDmDialogOpen(false)
+                        router.push("/shopkeepers")
+                      }}
+                    >
+                      Open
+                    </Button>
+                    <Button
+                      className="bg-purple-600 hover:bg-purple-700 text-white"
+                      onClick={() => {
+                        setDmDialogOpen(false)
+                        router.push("/shopkeepers?autoGenerate=1")
+                      }}
+                      title="Open and generate immediately"
+                    >
+                      <Sparkles className="w-4 h-4 mr-2" />
+                      Generate Now
+                    </Button>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-gray-800 border-gray-700">
+                  <CardHeader>
+                    <CardTitle className="text-gray-200 flex items-center gap-2">
+                      <Users className="w-4 h-4 text-purple-400" />
+                      Players
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <Button
+                      className="bg-gray-900 border border-gray-700 text-white"
+                      onClick={() => {
+                        setDmDialogOpen(false)
+                        router.push("/shopkeepers#players")
+                      }}
+                    >
+                      Manage Gold
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
+              <DialogFooter>
+                <Button
+                  onClick={() => setDmDialogOpen(false)}
+                  className="bg-gray-700 text-white border border-gray-600"
+                >
+                  Close
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           {/* Mobile actions */}
           <div className="sm:hidden flex items-center gap-2">
             <Button
@@ -492,7 +622,7 @@ export default function HomePage() {
               onClick={() => setGeneratorsOpen(true)}
               title="Generators"
             >
-              <Sparkles className="w-4 h-4" />
+              <Wand2 className="w-4 h-4" />
             </Button>
             <Button
               size="sm"
@@ -506,7 +636,33 @@ export default function HomePage() {
           </div>
         </div>
 
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex items-center space-x-2">
+          <span className="text-gray-300 hidden sm:block">
+            {(user?.fullName || user?.primaryEmailAddress?.toString() || "Guest") + ` (${userId?.substring(0, 8)})`}
+          </span>
+          <Button
+            variant="secondary"
+            size="icon"
+            className="bg-gray-700 text-white border-gray-600"
+            onClick={async () => {
+              if (!userId) return
+              await navigator.clipboard.writeText(userId)
+              toast({
+                title: "Copied",
+                description: "Your user ID was copied to clipboard",
+                className: "bg-green-600 text-white",
+              })
+            }}
+            title="Copy your user ID"
+          >
+            <Copy className="w-4 h-4" />
+          </Button>
+          <UserButton afterSignOutUrl="/sign-in" />
+        </div>
+      </header>
+
+      <main className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 min-h-0">
           {/* Left sidebar (hidden on mobile) */}
           <aside className="hidden md:flex w-[380px] p-4 border-r border-gray-700 bg-gray-800 flex-col space-y-4 overflow-y-auto">
             <h2 className="text-xl font-semibold text-purple-400">Campaign & Session</h2>
@@ -692,116 +848,6 @@ export default function HomePage() {
             </div>
           </aside>
         </div>
-      </header>
-
-      <main className="min-h-screen bg-gray-900 text-white">
-        <div className="mx-auto max-w-5xl p-6">
-          <header className="flex items-center justify-between mb-6">
-            <h1 className="text-2xl font-bold text-purple-400 flex items-center gap-2">
-              <LayoutDashboard className="w-5 h-5" />
-              DM Tools
-            </h1>
-            <Dialog open={open} onOpenChange={setOpen}>
-              <DialogTrigger asChild>
-                <Button className="bg-purple-600 hover:bg-purple-700 text-white">
-                  <Hammer className="w-4 h-4 mr-2" />
-                  Open DM Tools
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="bg-gray-850 bg-gray-800 border border-gray-700 text-white">
-                <DialogHeader>
-                  <DialogTitle className="text-purple-300">DM Tools</DialogTitle>
-                  <DialogDescription className="text-gray-400">Quick actions for game masters</DialogDescription>
-                </DialogHeader>
-                <div className="grid sm:grid-cols-2 gap-3">
-                  <Card className="bg-gray-800 border-gray-700">
-                    <CardHeader>
-                      <CardTitle className="text-gray-200 flex items-center gap-2">
-                        <Store className="w-4 h-4 text-purple-400" />
-                        Shopkeepers
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="flex gap-2">
-                      <Button
-                        className="bg-gray-900 border border-gray-700 text-white"
-                        onClick={() => {
-                          setOpen(false)
-                          router.push("/shopkeepers")
-                        }}
-                      >
-                        Open
-                      </Button>
-                      <Button
-                        className="bg-purple-600 hover:bg-purple-700 text-white"
-                        onClick={() => {
-                          setOpen(false)
-                          // Auto-generate on arrival
-                          router.push("/shopkeepers?autoGenerate=1")
-                        }}
-                        title="Open and generate immediately"
-                      >
-                        <Sparkles className="w-4 h-4 mr-2" />
-                        Generate Now
-                      </Button>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="bg-gray-800 border-gray-700">
-                    <CardHeader>
-                      <CardTitle className="text-gray-200 flex items-center gap-2">
-                        <Users className="w-4 h-4 text-purple-400" />
-                        Players
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <Button
-                        className="bg-gray-900 border border-gray-700 text-white"
-                        onClick={() => {
-                          setOpen(false)
-                          router.push("/shopkeepers#players")
-                        }}
-                      >
-                        Manage Gold
-                      </Button>
-                    </CardContent>
-                  </Card>
-                </div>
-              </DialogContent>
-            </Dialog>
-          </header>
-
-          <section className="grid md:grid-cols-2 gap-4">
-            <Card className="bg-gray-800 border-gray-700">
-              <CardHeader>
-                <CardTitle className="text-gray-200">Welcome</CardTitle>
-              </CardHeader>
-              <CardContent className="text-gray-400">
-                Use DM Tools to manage your campaign markets, generate shopkeepers, and handle player gold.
-              </CardContent>
-            </Card>
-
-            <Card className="bg-gray-800 border-gray-700">
-              <CardHeader>
-                <CardTitle className="text-gray-200">Quick Start</CardTitle>
-              </CardHeader>
-              <CardContent className="flex gap-2">
-                <Button
-                  className="bg-purple-600 hover:bg-purple-700 text-white"
-                  onClick={() => router.push("/shopkeepers")}
-                >
-                  Open Shopkeepers
-                </Button>
-                <Button
-                  className="bg-purple-700 hover:bg-purple-800 text-white"
-                  onClick={() => router.push("/shopkeepers?autoGenerate=1")}
-                >
-                  <Sparkles className="w-4 h-4 mr-2" />
-                  Generate Shopkeepers Now
-                </Button>
-              </CardContent>
-            </Card>
-          </section>
-        </div>
       </main>
 
       {/* Generators Dialog (mobile-friendly) */}
@@ -883,6 +929,27 @@ export default function HomePage() {
           </div>
           <DialogFooter>
             <Button onClick={() => setDetailsOpen(false)} className="bg-gray-700 text-white border border-gray-600">
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Error/Response dialog */}
+      <Dialog open={showLlmResponseDialog} onOpenChange={setShowLlmResponseDialog}>
+        <DialogContent className="sm:max-w-[600px] bg-gray-800 text-white border-gray-700">
+          <DialogHeader>
+            <DialogTitle className="text-2xl text-purple-400">{llmResponseTitle}</DialogTitle>
+            <DialogDescription className="text-gray-400">Details of the response or error.</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[400px] overflow-y-auto p-4 bg-gray-700 rounded-md text-sm font-mono text-gray-200">
+            <pre className="whitespace-pre-wrap break-words">{llmResponseContent}</pre>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => setShowLlmResponseDialog(false)}
+              className="bg-purple-600 hover:bg-purple-700 text-white"
+            >
               Close
             </Button>
           </DialogFooter>

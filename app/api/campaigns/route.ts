@@ -1,28 +1,60 @@
 import { NextResponse } from "next/server"
 import { auth } from "@clerk/nextjs/server"
-import { createClient } from "@/lib/supabaseAdmin"
+import { createServerSupabaseClient } from "@/lib/supabaseAdmin"
 
 export const runtime = "nodejs"
 
 export async function GET() {
-  try {
-    const { userId } = auth()
-    if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  const { userId, getToken } = await auth()
+  if (!userId || !getToken) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-    const supabase = createClient()
-    // List campaigns where the user is the DM. You can extend to include membership as needed.
-    const { data, error } = await supabase
-      .from("campaigns")
-      .select("id, name, access_enabled, dm_id")
-      .eq("dm_id", userId)
-      .order("created_at", { ascending: false })
+  // Use Clerk -> Supabase JWT so RLS and policies apply correctly
+  const token = await getToken({ template: "supabase" })
+  if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-    if (error) throw error
+  const supabase = createServerSupabaseClient(token)
 
-    return NextResponse.json({ campaigns: data ?? [] })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message || "Internal error" }, { status: 500 })
+  console.log("[api/campaigns] GET for user", userId)
+
+  // Campaigns the user owns (original behavior)
+  const owned = await supabase.from("campaigns").select("id, name, updated_at").eq("owner_id", userId)
+  if (owned.error) {
+    console.error("[api/campaigns] owned error:", owned.error.message)
+    return NextResponse.json({ error: owned.error.message }, { status: 500 })
   }
+
+  // Campaigns where user participates in any session (original behavior)
+  let participantCampaignIds: string[] = []
+  try {
+    // Use 'cs' (contains) explicitly with a stringified JSON so PostgREST parses it
+    const containsValue = JSON.stringify([{ userId }])
+    const sessionsRes = await supabase
+      .from("sessions")
+      .select("campaign_id")
+      .filter("participants", "cs", containsValue)
+
+    if (!sessionsRes.error) {
+      participantCampaignIds = (sessionsRes.data || []).map((s: any) => s.campaign_id).filter(Boolean)
+    } else {
+      console.warn("[api/campaigns] sessions contains failed; continuing with owned only:", sessionsRes.error.message)
+    }
+  } catch (e: any) {
+    console.warn("[api/campaigns] sessions contains threw; continuing with owned only:", e?.message || e)
+  }
+
+  const campaignIds = Array.from(new Set([...(owned.data || []).map((c) => c.id), ...participantCampaignIds]))
+
+  if (campaignIds.length === 0) {
+    return NextResponse.json({ campaigns: owned.data || [] })
+  }
+
+  const campaigns = await supabase.from("campaigns").select("id, name, updated_at").in("id", campaignIds)
+  if (campaigns.error) {
+    console.error("[api/campaigns] campaigns error:", campaigns.error.message)
+    return NextResponse.json({ error: campaigns.error.message }, { status: 500 })
+  }
+
+  return NextResponse.json({ campaigns: campaigns.data })
 }
 
 export async function POST(req: Request) {
@@ -36,7 +68,7 @@ export async function POST(req: Request) {
   const name = String(body?.name || "").trim()
   if (!name) return NextResponse.json({ error: "Name is required" }, { status: 400 })
 
-  const supabase = createClient()
+  const supabase = createServerSupabaseClient(token)
   const { data, error } = await supabase
     .from("campaigns")
     .insert({ name, owner_id: userId, settings: { members: [] } })

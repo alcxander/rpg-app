@@ -1,7 +1,7 @@
 /**
- * Price and catalog helpers for shop generation.
- * Prices are representative and can be adjusted as needed.
- * Final price is clamped to +/- 5% of base price at generation time.
+ * Pricing catalog and helpers for shop generation.
+ * - Keeps items aligned to D&D-ish price bands.
+ * - Applies a locked-in ±5% variance at generation time.
  */
 
 export type Rarity = "common" | "uncommon" | "rare" | "wondrous" | "legendary"
@@ -13,69 +13,48 @@ export type CatalogItem = {
   basePrice: number // in gp
 }
 
-/** +/- 5% clamp applied randomly */
-export function clampTo5Percent(base: number): { pct: number; final: number } {
-  const sign = Math.random() < 0.5 ? -1 : 1
-  const pctAbs = Math.floor(Math.random() * 6) // 0-5
-  const pct = sign * pctAbs
-  const final = Math.max(0, Math.round((base * (100 + pct)) / 100))
-  return { pct, final }
-}
-
-/**
- * Catalogs per shop type.
- * Bias toward common/uncommon with rare/wondrous appearing, legendary very rare.
- */
 const POTION_CATALOG: CatalogItem[] = [
   { name: "Potion of Healing", rarity: "common", basePrice: 50 },
-  { name: "Potion of Greater Healing", rarity: "uncommon", basePrice: 150 },
-  { name: "Potion of Superior Healing", rarity: "rare", basePrice: 450 },
-  { name: "Potion of Supreme Healing", rarity: "wondrous", basePrice: 1350 },
+  { name: "Potion of Greater Healing", rarity: "uncommon", basePrice: 100 },
+  { name: "Potion of Superior Healing", rarity: "rare", basePrice: 500 },
+  { name: "Potion of Supreme Healing", rarity: "wondrous", basePrice: 5000 },
   { name: "Potion of Climbing", rarity: "common", basePrice: 30 },
-  { name: "Potion of Invisibility", rarity: "wondrous", basePrice: 2500 },
-  { name: "Potion of Heroism", rarity: "rare", basePrice: 1200 },
-  { name: "Antitoxin", rarity: "common", basePrice: 50 },
-  { name: "Potion of Speed", rarity: "wondrous", basePrice: 3000 },
-  { name: "Elixir of Health", rarity: "rare", basePrice: 500 },
+  { name: "Potion of Invisibility", rarity: "rare", basePrice: 2500 },
+  { name: "Potion of Fire Breath", rarity: "uncommon", basePrice: 150 },
+  { name: "Antitoxin (vial)", rarity: "common", basePrice: 50 },
 ]
 
 const ARCANA_CATALOG: CatalogItem[] = [
   { name: "Spell Scroll (Cantrip)", rarity: "common", basePrice: 25 },
-  { name: "Spell Scroll (1st level)", rarity: "common", basePrice: 50 },
-  { name: "Spell Scroll (2nd level)", rarity: "uncommon", basePrice: 150 },
-  { name: "Spell Scroll (3rd level)", rarity: "uncommon", basePrice: 300 },
-  { name: "Spell Scroll (4th level)", rarity: "rare", basePrice: 750 },
-  { name: "Spell Scroll (5th level)", rarity: "rare", basePrice: 1350 },
-  { name: "Pearl of Power", rarity: "rare", basePrice: 1000 },
-  { name: "Wand of the War Mage +1", rarity: "uncommon", basePrice: 300 },
-  { name: "Wand of Magic Detection", rarity: "uncommon", basePrice: 250 },
-  { name: "Ring of Spell Storing", rarity: "wondrous", basePrice: 5000 },
+  { name: "Spell Scroll (Level 1)", rarity: "common", basePrice: 50 },
+  { name: "Spell Scroll (Level 2)", rarity: "uncommon", basePrice: 100 },
+  { name: "Spell Scroll (Level 3)", rarity: "uncommon", basePrice: 250 },
+  { name: "Spell Scroll (Level 4)", rarity: "rare", basePrice: 500 },
+  { name: "Wand of Magic Detection", rarity: "uncommon", basePrice: 500 },
+  { name: "Pearl of Power", rarity: "rare", basePrice: 5000 },
+  { name: "Bag of Holding", rarity: "wondrous", basePrice: 4000 },
 ]
 
 const BLACKSMITH_CATALOG: CatalogItem[] = [
   { name: "Dagger", rarity: "common", basePrice: 2 },
-  { name: "Shortsword", rarity: "common", basePrice: 10 },
   { name: "Longsword", rarity: "common", basePrice: 15 },
   { name: "Greatsword", rarity: "uncommon", basePrice: 50 },
-  { name: "Rapier", rarity: "uncommon", basePrice: 25 },
   { name: "Shield", rarity: "common", basePrice: 10 },
-  { name: "Chain Shirt", rarity: "uncommon", basePrice: 50 },
-  { name: "+1 Weapon (certificate)", rarity: "rare", basePrice: 1500 },
-  { name: "+1 Shield (certificate)", rarity: "rare", basePrice: 1500 },
-  { name: "Repair Service", rarity: "common", basePrice: 5 },
+  { name: "Chain Mail", rarity: "uncommon", basePrice: 75 },
+  { name: "Breastplate", rarity: "rare", basePrice: 400 },
+  { name: "Plate Armor", rarity: "wondrous", basePrice: 1500 },
+  { name: "Repair Service (per weapon)", rarity: "common", basePrice: 5 },
 ]
 
 const GENERAL_CATALOG: CatalogItem[] = [
   { name: "Rations (1 day)", rarity: "common", basePrice: 0.5 },
   { name: "Rope (50 feet)", rarity: "common", basePrice: 1 },
   { name: "Torch", rarity: "common", basePrice: 0.01 },
-  { name: "Lantern", rarity: "common", basePrice: 5 },
-  { name: "Healer’s Kit", rarity: "uncommon", basePrice: 5 },
-  { name: "Clothes, Traveler’s", rarity: "common", basePrice: 2 },
-  { name: "Backpack", rarity: "common", basePrice: 2 },
-  { name: "Lock", rarity: "uncommon", basePrice: 10 },
-  { name: "Spyglass", rarity: "wondrous", basePrice: 1000 },
-  { name: "Tent, Two-Person", rarity: "uncommon", basePrice: 2 },
+  { name: "Healer's Kit", rarity: "uncommon", basePrice: 5 },
+  { name: "Clothes, Traveler's", rarity: "common", basePrice: 2 },
+  { name: "Tent (2-person)", rarity: "uncommon", basePrice: 2 },
+  { name: "Lantern, Hooded", rarity: "common", basePrice: 5 },
+  { name: "Grappling Hook", rarity: "uncommon", basePrice: 2 },
 ]
 
 export function pickCatalog(type: ShopType): CatalogItem[] {
@@ -88,7 +67,25 @@ export function pickCatalog(type: ShopType): CatalogItem[] {
       return BLACKSMITH_CATALOG
     case "general":
       return GENERAL_CATALOG
+    case "custom":
     default:
-      return GENERAL_CATALOG
+      // For custom, mix a few from each as a baseline
+      return [
+        ...POTION_CATALOG.slice(0, 2),
+        ...ARCANA_CATALOG.slice(0, 2),
+        ...BLACKSMITH_CATALOG.slice(0, 2),
+        ...GENERAL_CATALOG.slice(0, 2),
+      ]
   }
+}
+
+/**
+ * Creates a locked-in ±5% adjustment for a base price.
+ * Returns integer percent and a rounded final price to 2 decimals.
+ */
+export function clampTo5Percent(basePrice: number): { pct: number; final: number } {
+  // -5..+5 inclusive
+  const pct = Math.floor(-5 + Math.random() * 11)
+  const final = Math.round(basePrice * (1 + pct / 100) * 100) / 100
+  return { pct, final }
 }

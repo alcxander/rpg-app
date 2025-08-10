@@ -49,6 +49,7 @@ export default function HomePage() {
   const { user, isLoaded, isSignedIn } = useUser()
   const userId = user?.id || null
 
+  // Gate: ensure our DB user exists
   const [userReady, setUserReady] = useState(false)
   const [ensureUserError, setEnsureUserError] = useState<string | null>(null)
 
@@ -81,12 +82,14 @@ export default function HomePage() {
   const [sendingChat, setSendingChat] = useState(false)
   const { toast } = useToast()
 
+  // Mobile overlays
   const [generatorsOpen, setGeneratorsOpen] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
 
+  // Token highlight
   const [highlightTokenId, setHighlightTokenId] = useState<string | null>(null)
 
-  // Ensure user row exists
+  // Ensure user exists in our DB before rendering the app
   useEffect(() => {
     const run = async () => {
       if (!isLoaded || !isSignedIn) return
@@ -210,7 +213,7 @@ export default function HomePage() {
 
   const handleTokenMove = useCallback(
     (tokenId: string, x: number, y: number) => {
-      // Single-source update + log via realtime broadcast
+      // Only emit through the realtime channel; the session hook will append a single log entry.
       moveTokenAndLog(tokenId, x, y)
     },
     [moveTokenAndLog],
@@ -218,6 +221,7 @@ export default function HomePage() {
 
   const memoMap = useMemo(() => sessionState.map ?? null, [sessionState.map])
 
+  // Convert a battle's monsters/allies into MapToken[] snapshot
   const tokensFromBattle = useCallback((battle: any): MapToken[] => {
     const monsters: any[] = Array.isArray(battle?.monsters) ? battle.monsters : []
     const allies: any[] = Array.isArray(battle?.allies) ? battle.allies : []
@@ -305,6 +309,7 @@ export default function HomePage() {
     [sessionId, userId, toast, emitEvent, setSessionState],
   )
 
+  // Switch to a battle: apply its snapshot to the map and set chat log
   const onSelectBattle = (battleId: string) => {
     const b: any = sessionState.battles.find((x) => x.id === battleId) || null
     if (!b) return
@@ -452,7 +457,7 @@ export default function HomePage() {
       <div className="h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-6 text-center">
         <h1 className="text-2xl font-semibold mb-2">Setting up your account...</h1>
         <p className="text-gray-400 max-w-md mb-4">
-          We’re linking your Clerk profile to the game database. You must exist in our database to use the app.
+          We’re linking your profile to the game database, if you're seeing this sorry just gotta link your profile across systems. It drops sometimes. You must exist in our database to use the app.
         </p>
         {ensureUserError && <p className="text-red-400 text-sm mb-2">{ensureUserError}</p>}
         <Button onClick={() => location.reload()} className="bg-purple-600 hover:bg-purple-700 text-white">
@@ -544,7 +549,7 @@ export default function HomePage() {
 
       <main className="flex flex-1 overflow-hidden">
         <div className="flex flex-1 min-h-0">
-          {/* Left sidebar */}
+          {/* Left sidebar (hidden on mobile) */}
           <aside className="hidden md:flex w-[380px] p-4 border-r border-gray-700 bg-gray-800 flex-col space-y-4 overflow-y-auto">
             <h2 className="text-xl font-semibold text-purple-400">Campaign & Session</h2>
 
@@ -573,7 +578,6 @@ export default function HomePage() {
                   onClick={onCreateCampaign}
                   className="bg-green-600 hover:bg-green-700 text-white"
                   title="Create campaign"
-                  disabled={!newCampaignName.trim()}
                 >
                   <Plus className="h-4 w-4" />
                 </Button>
@@ -690,22 +694,27 @@ export default function HomePage() {
             )}
           </section>
 
-          {/* Right sidebar */}
+          {/* Right sidebar (hidden on mobile) */}
           <aside className="hidden lg:flex w-[340px] p-4 border-l border-gray-700 bg-gray-800 flex-col space-y-4 overflow-y-auto">
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <h2 className="text-xl font-semibold text-purple-400">Current Battle</h2>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 max-w-60">
                 <Label className="text-gray-300">Battles</Label>
                 <Select value={sessionState.battle?.id || ""} onValueChange={onSelectBattle}>
-                  <SelectTrigger className="bg-gray-700 border-gray-600 text-white">
+                  <SelectTrigger className="bg-gray-700 border-gray-600 text-white w-full max-w-full">
                     <SelectValue placeholder="Select battle" />
                   </SelectTrigger>
                   <SelectContent className="bg-gray-800 text-white border-gray-700 max-h-64">
                     {sessionState.battles.map((b) => (
                       <SelectItem key={b.id} value={b.id}>
-                        {(b as any).name ? `${(b as any).name}` : "Battle"} — {new Date(b.created_at).toLocaleString()}
+                        <div className="flex w-full min-w-0 items-center">
+                          <span className="truncate max-w-[240px]">
+                            {(b as any).name ? `${(b as any).name}` : "Battle"} —{" "}
+                            {new Date(b.created_at).toLocaleString()}
+                          </span>
+                        </div>
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -713,10 +722,14 @@ export default function HomePage() {
               </div>
             </div>
 
-            <TokenList monsters={currentMonsters} pcs={currentPCs} onHoverToken={(id) => setHighlightTokenId(id)} />
+            {/* Initiative above TokenList */}
+            <Initiative
+              battle={sessionState.battle || null}
+              tokens={sessionState.map?.tokens || []}
+              onHighlightToken={(id) => setHighlightTokenId(id)}
+            />
 
-            {/* Restored Initiative component */}
-            <Initiative tokens={sessionState.map?.tokens || []} onHighlightToken={(id) => setHighlightTokenId(id)} />
+            <TokenList monsters={currentMonsters} pcs={currentPCs} onHoverToken={(id) => setHighlightTokenId(id)} />
 
             <div className="h-64">
               <ChatLog messages={sessionState.chatLog} title="Activity Log" />
@@ -725,7 +738,7 @@ export default function HomePage() {
         </div>
       </main>
 
-      {/* Generators Dialog */}
+      {/* Generators Dialog (mobile-friendly) */}
       <Dialog open={generatorsOpen} onOpenChange={setGeneratorsOpen}>
         <DialogContent className="sm:max-w-[680px] bg-gray-800 text-white border-gray-700">
           <DialogHeader>
@@ -760,7 +773,7 @@ export default function HomePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Details Dialog */}
+      {/* Details Dialog (mobile-friendly: current battle, tokens, activity log) */}
       <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
         <DialogContent className="sm:max-w-[680px] bg-gray-800 text-white border-gray-700">
           <DialogHeader>
@@ -771,22 +784,32 @@ export default function HomePage() {
             <div className="flex items-center gap-2">
               <Label className="text-gray-300">Battles</Label>
               <Select value={sessionState.battle?.id || ""} onValueChange={onSelectBattle}>
-                <SelectTrigger className="bg-gray-700 border-gray-600 text-white">
+                <SelectTrigger className="bg-gray-700 border-gray-600 text-white w-full max-w-full">
                   <SelectValue placeholder="Select battle" />
                 </SelectTrigger>
                 <SelectContent className="bg-gray-800 text-white border-gray-700 max-h-64">
                   {sessionState.battles.map((b) => (
                     <SelectItem key={b.id} value={b.id}>
-                      {(b as any).name ? `${(b as any).name}` : "Battle"} — {new Date(b.created_at).toLocaleString()}
+                      <div className="flex w-full min-w-0 items-center">
+                        <span className="truncate max-w-[240px]">
+                          {(b as any).name ? `${(b as any).name}` : "Battle"} —{" "}
+                          {new Date(b.created_at).toLocaleString()}
+                        </span>
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
-            <TokenList monsters={currentMonsters} pcs={currentPCs} onHoverToken={(id) => setHighlightTokenId(id)} />
+            {/* Initiative above TokenList in details dialog */}
+            <Initiative
+              battle={sessionState.battle || null}
+              tokens={sessionState.map?.tokens || []}
+              onHighlightToken={(id) => setHighlightTokenId(id)}
+            />
 
-            <Initiative tokens={sessionState.map?.tokens || []} onHighlightToken={(id) => setHighlightTokenId(id)} />
+            <TokenList monsters={currentMonsters} pcs={currentPCs} onHoverToken={(id) => setHighlightTokenId(id)} />
 
             <div className="h-64">
               <ChatLog messages={sessionState.chatLog} title="Activity Log" />
@@ -805,6 +828,7 @@ export default function HomePage() {
         <DialogContent className="sm:max-w-[600px] bg-gray-800 text-white border-gray-700">
           <DialogHeader>
             <DialogTitle className="text-2xl text-purple-400">{llmResponseTitle}</DialogTitle>
+            <DialogDescription className="text-gray-400">Details of the response or error.</DialogDescription>
           </DialogHeader>
           <div className="max-h-[400px] overflow-y-auto p-4 bg-gray-700 rounded-md text-sm font-mono text-gray-200">
             <pre className="whitespace-pre-wrap break-words">{llmResponseContent}</pre>
@@ -820,7 +844,7 @@ export default function HomePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Battle Form dialog */}
+      {/* Battle Form dialog (shared desktop/mobile) */}
       {true && (
         <BattleForm
           isOpen={showBattleForm}

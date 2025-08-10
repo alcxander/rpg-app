@@ -10,6 +10,7 @@ const inter = Inter({ subsets: ['latin'] });
 export const metadata: Metadata = {
   title: 'DM Tool App',
   description: 'Real-time tabletop RPG collaboration tool for DMs and Players',
+    generator: 'v0.dev'
 };
 
 export default function RootLayout({

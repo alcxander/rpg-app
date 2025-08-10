@@ -505,6 +505,12 @@ export default function HomePage() {
               <DropdownMenuItem onClick={() => router.push("/shopkeepers")} className="focus:bg-gray-700">
                 <Store className="w-4 h-4 mr-2" /> Shopkeepers
               </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => router.push("/shopkeepers?autoGenerate=1")}
+                className="focus:bg-gray-700"
+              >
+                <Store className="w-4 h-4 mr-2" /> Generate Shopkeepers Now
+              </DropdownMenuItem>
               <DropdownMenuItem disabled className="focus:bg-gray-700">
                 <Gem className="w-4 h-4 mr-2" /> Generate Loot (Soon)
               </DropdownMenuItem>

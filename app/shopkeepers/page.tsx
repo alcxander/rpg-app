@@ -1,17 +1,31 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useUser, RedirectToSignIn } from "@clerk/nextjs"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useToast } from "@/hooks/use-toast"
-import { Plus, RefreshCw, ToggleRight, Coins, ShoppingCart, Shield, Loader2, Home } from "lucide-react"
-import { useRouter } from "next/navigation"
+import { ToastAction } from "@/components/ui/toast"
+import {
+  Plus,
+  RefreshCw,
+  ToggleRight,
+  Coins,
+  ShoppingCart,
+  Shield,
+  Loader2,
+  Home,
+  AlertTriangle,
+  Wrench,
+} from "lucide-react"
+
+// Note: Table components are part of your UI set. If not, replace with simple divs.
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
 type CampaignOption = { id: string; name: string; access_enabled?: boolean; owner_id?: string }
 
@@ -41,53 +55,87 @@ type Shopkeeper = {
 
 export default function ShopkeepersPage() {
   const router = useRouter()
+  const search = useSearchParams()
   const { user, isLoaded, isSignedIn } = useUser()
   const { toast } = useToast()
+
+  // Campaign selection
   const [campaigns, setCampaigns] = useState<CampaignOption[]>([])
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
 
+  // Data
   const [shopkeepers, setShopkeepers] = useState<Shopkeeper[]>([])
   const [campaignAccessEnabled, setCampaignAccessEnabled] = useState<boolean>(true)
   const [isOwner, setIsOwner] = useState<boolean>(false)
 
+  // UI state
   const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [count, setCount] = useState(5)
+  const [sessionId, setSessionId] = useState<string>("")
 
+  // Utility: safe JSON parsing with text fallback
+  const parseJsonSafe = async (res: Response) => {
+    try {
+      const data = await res.json()
+      return { data, raw: JSON.stringify(data) }
+    } catch {
+      const text = await res.text()
+      return { data: null, raw: text }
+    }
+  }
+
+  const showError = (title: string, errorRaw: string) => {
+    toast({
+      title,
+      description: errorRaw,
+      variant: "destructive",
+      className: "bg-red-600 text-white",
+      action: (
+        <ToastAction
+          altText="Copy error"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(errorRaw)
+            } catch {
+              // ignore
+            }
+          }}
+        >
+          Copy
+        </ToastAction>
+      ),
+    })
+  }
+
+  // Load campaigns
   useEffect(() => {
     if (!isLoaded || !isSignedIn) return
     ;(async () => {
       try {
         const res = await fetch("/api/campaigns")
-        // Ensure JSON parse only if response is JSON
-        const data = await res.json()
-        if (!res.ok) throw new Error(data?.error || "Failed to load campaigns")
+        const { data, raw } = await parseJsonSafe(res)
+        if (!res.ok) throw new Error(raw || "Failed to load campaigns")
         setCampaigns(data.campaigns || [])
         if (!selectedCampaignId && data.campaigns?.[0]?.id) setSelectedCampaignId(data.campaigns[0].id)
       } catch (e: any) {
-        toast({
-          title: "Failed to load campaigns",
-          description: e.message,
-          variant: "destructive",
-          className: "bg-red-600 text-white",
-        })
+        showError("Failed to load campaigns", String(e?.message || e))
       }
     })()
   }, [isLoaded, isSignedIn]) // eslint-disable-line
 
+  // Load shopkeepers for a campaign
   const loadShopkeepers = async (cid: string) => {
     setLoading(true)
     try {
       const res = await fetch(`/api/shopkeepers?campaignId=${encodeURIComponent(cid)}`)
-      const data = await res.json()
-      if (!res.ok) {
-        throw new Error(data?.error || "Failed to load shopkeepers")
-      }
+      const { data, raw } = await parseJsonSafe(res)
+      if (!res.ok) throw new Error(raw || "Failed to load shopkeepers")
       setShopkeepers(data.shopkeepers || [])
       setCampaignAccessEnabled(Boolean(data.campaign?.access_enabled))
       setIsOwner(Boolean(data.campaign?.isOwner))
     } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive", className: "bg-red-600 text-white" })
+      showError("Error loading shopkeepers", String(e?.message || e))
     } finally {
       setLoading(false)
     }
@@ -97,6 +145,7 @@ export default function ShopkeepersPage() {
     if (selectedCampaignId) loadShopkeepers(selectedCampaignId)
   }, [selectedCampaignId]) // eslint-disable-line
 
+  // Generation action
   const onGenerate = async () => {
     if (!selectedCampaignId) return
     setGenerating(true)
@@ -106,22 +155,18 @@ export default function ShopkeepersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ campaignId: selectedCampaignId, count }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.error || "Generation failed")
+      const { data, raw } = await parseJsonSafe(res)
+      if (!res.ok) throw new Error(raw || "Generation failed")
       toast({ title: "Shopkeepers created", className: "bg-green-600 text-white" })
       await loadShopkeepers(selectedCampaignId)
     } catch (e: any) {
-      toast({
-        title: "Generation error",
-        description: e.message,
-        variant: "destructive",
-        className: "bg-red-600 text-white",
-      })
+      showError("Generation error", String(e?.message || e))
     } finally {
       setGenerating(false)
     }
   }
 
+  // DM toggle
   const toggleAccess = async () => {
     if (!selectedCampaignId) return
     try {
@@ -130,19 +175,17 @@ export default function ShopkeepersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ access_enabled: !campaignAccessEnabled }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.error || "Failed to update")
+      const { data, raw } = await parseJsonSafe(res)
+      if (!res.ok) throw new Error(raw || "Failed to update")
       setCampaignAccessEnabled(Boolean(data.campaign?.access_enabled))
       toast({
         title: `Shop access ${data.campaign?.access_enabled ? "enabled" : "disabled"}`,
         className: "bg-green-600 text-white",
       })
     } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive", className: "bg-red-600 text-white" })
+      showError("Error", String(e?.message || e))
     }
   }
-
-  const [sessionId, setSessionId] = useState<string>("")
 
   const onBuy = async (inventoryId: string, quantity: number) => {
     try {
@@ -151,17 +194,12 @@ export default function ShopkeepersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ inventoryId, quantity, sessionId: sessionId || null }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.error || "Purchase failed")
+      const { data, raw } = await parseJsonSafe(res)
+      if (!res.ok) throw new Error(raw || "Purchase failed")
       toast({ title: "Purchased", className: "bg-green-600 text-white" })
       if (selectedCampaignId) await loadShopkeepers(selectedCampaignId)
     } catch (e: any) {
-      toast({
-        title: "Purchase error",
-        description: e.message,
-        variant: "destructive",
-        className: "bg-red-600 text-white",
-      })
+      showError("Purchase error", String(e?.message || e))
     }
   }
 
@@ -176,12 +214,12 @@ export default function ShopkeepersPage() {
           ...(typeof price === "number" ? { final_price: price } : {}),
         }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.error || "Update failed")
+      const { data, raw } = await parseJsonSafe(res)
+      if (!res.ok) throw new Error(raw || "Update failed")
       toast({ title: "Updated", className: "bg-green-600 text-white" })
       if (selectedCampaignId) await loadShopkeepers(selectedCampaignId)
     } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive", className: "bg-red-600 text-white" })
+      showError("Error", String(e?.message || e))
     }
   }
 
@@ -195,12 +233,12 @@ export default function ShopkeepersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.error || "Add failed")
+      const { data, raw } = await parseJsonSafe(res)
+      if (!res.ok) throw new Error(raw || "Add failed")
       toast({ title: "Item added", className: "bg-green-600 text-white" })
       if (selectedCampaignId) await loadShopkeepers(selectedCampaignId)
     } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive", className: "bg-red-600 text-white" })
+      showError("Error", String(e?.message || e))
     }
   }
 
@@ -213,13 +251,32 @@ export default function ShopkeepersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ playerId, campaignId: selectedCampaignId, goldAmount: amount }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.error || "Update failed")
+      const { data, raw } = await parseJsonSafe(res)
+      if (!res.ok) throw new Error(raw || "Update failed")
       toast({ title: "Gold updated", className: "bg-green-600 text-white" })
     } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive", className: "bg-red-600 text-white" })
+      showError("Error", String(e?.message || e))
     }
   }
+
+  // Auto-generate when coming from DM Tools
+  const autoGenTriggered = useRef(false)
+  const shouldAutoGenerate = useMemo(() => {
+    const ag = search.get("autoGenerate")
+    return ag === "1" || ag === "true"
+  }, [search])
+
+  useEffect(() => {
+    if (!isOwner) return
+    if (!selectedCampaignId) return
+    if (!shouldAutoGenerate) return
+    if (autoGenTriggered.current) return
+    // optional count override
+    const c = Number(search.get("count") || "")
+    if (Number.isFinite(c) && c >= 5 && c <= 20) setCount(c)
+    autoGenTriggered.current = true
+    onGenerate()
+  }, [isOwner, selectedCampaignId, shouldAutoGenerate, search]) // eslint-disable-line
 
   if (!isLoaded) {
     return (
@@ -234,6 +291,7 @@ export default function ShopkeepersPage() {
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       <div className="mx-auto max-w-7xl px-4 py-6">
+        {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold text-purple-400">Shopkeepers</h1>
           <div className="flex gap-2">
@@ -276,6 +334,17 @@ export default function ShopkeepersPage() {
           </div>
         </div>
 
+        {/* Generation status */}
+        {generating && (
+          <div className="mb-4 p-3 rounded border border-yellow-600/40 bg-yellow-500/10 text-yellow-200 flex items-center gap-3">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <div>
+              <div className="font-medium">Generating shopkeepers...</div>
+              <div className="text-xs opacity-80">Creating {count} shopkeepers. This may take a few seconds.</div>
+            </div>
+          </div>
+        )}
+
         <Tabs defaultValue="market">
           <TabsList className="bg-gray-800">
             <TabsTrigger value="market">Market</TabsTrigger>
@@ -283,14 +352,54 @@ export default function ShopkeepersPage() {
             <TabsTrigger value="players">Players</TabsTrigger>
           </TabsList>
 
+          {/* Market Tab */}
           <TabsContent value="market" className="mt-4">
+            {/* Always show DM Generate controls at the top of Market */}
+            {isOwner && (
+              <Card className="bg-gray-800 border-gray-700 mb-4">
+                <CardContent className="py-4 flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-gray-300">Generate count</Label>
+                    <Input
+                      type="number"
+                      min={5}
+                      max={20}
+                      value={count}
+                      onChange={(e) => setCount(Number.parseInt(e.target.value || "5", 10))}
+                      className="w-24 bg-gray-900 border-gray-700 text-white"
+                    />
+                  </div>
+                  <Button
+                    onClick={onGenerate}
+                    className="bg-purple-600 hover:bg-purple-700 text-white"
+                    disabled={generating || !selectedCampaignId}
+                    title="Generate new shopkeepers"
+                  >
+                    {generating ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
+                    Generate Shopkeepers
+                  </Button>
+                  <Button
+                    onClick={toggleAccess}
+                    variant="secondary"
+                    className="bg-gray-900 border border-gray-700 text-white"
+                  >
+                    <ToggleRight className="w-4 h-4 mr-2" />
+                    {campaignAccessEnabled ? "Disable player access" : "Enable player access"}
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+
             {loading ? (
               <div className="flex items-center text-gray-400">
                 <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading shopkeepers...
               </div>
             ) : shopkeepers.length === 0 ? (
               <div className="flex flex-col items-start gap-3 text-gray-400">
-                <p>No shopkeepers.</p>
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-yellow-300" />
+                  <p>No shopkeepers yet.</p>
+                </div>
                 {isOwner && (
                   <div className="flex items-center gap-2">
                     <Label className="text-gray-300">Generate count</Label>
@@ -320,7 +429,7 @@ export default function ShopkeepersPage() {
             ) : (
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {shopkeepers.map((sk) => (
-                  <Card key={sk.id} className="bg-gray-800 border-gray-700">
+                  <Card key={sk.id} className="bg-gray-8 00 border-gray-700">
                     <CardHeader>
                       <CardTitle className="flex items-center justify-between">
                         <span>
@@ -328,7 +437,7 @@ export default function ShopkeepersPage() {
                         </span>
                         {sk.image_url ? (
                           <img
-                            src={sk.image_url || "/placeholder.svg"}
+                            src={sk.image_url || "/placeholder.svg?height=48&width=48&query=shopkeeper%20token"}
                             alt={`${sk.name} token`}
                             className="w-12 h-12 rounded-full object-cover border border-gray-600"
                           />
@@ -404,6 +513,7 @@ export default function ShopkeepersPage() {
             )}
           </TabsContent>
 
+          {/* Management Tab */}
           <TabsContent value="management" className="mt-4">
             {isOwner ? (
               <>
@@ -448,13 +558,14 @@ export default function ShopkeepersPage() {
                     <Card key={sk.id} className="bg-gray-800 border-gray-700">
                       <CardHeader>
                         <CardTitle className="flex items-center justify-between">
-                          <span>
+                          <span className="flex items-center gap-2">
+                            <Wrench className="w-4 h-4 text-gray-400" />
                             {sk.name} <span className="text-xs text-gray-400">({sk.shop_type})</span>
                           </span>
                           <div className="flex items-center gap-2">
                             {sk.image_url ? (
                               <img
-                                src={sk.image_url || "/placeholder.svg"}
+                                src={sk.image_url || "/placeholder.svg?height=40&width=40&query=shopkeeper%20token"}
                                 alt={`${sk.name} token`}
                                 className="w-10 h-10 rounded-full object-cover border border-gray-600"
                               />
@@ -469,6 +580,7 @@ export default function ShopkeepersPage() {
                           {sk.race}, {sk.alignment}, {sk.age} yrs
                         </div>
                         <div className="text-xs text-gray-400 mb-3">{sk.description}</div>
+
                         <div className="text-sm font-semibold text-gray-200 mb-2">Inventory</div>
                         <Table>
                           <TableHeader>
@@ -523,6 +635,7 @@ export default function ShopkeepersPage() {
             )}
           </TabsContent>
 
+          {/* Players Tab */}
           <TabsContent value="players" className="mt-4">
             {isOwner ? (
               <PlayersGoldEditor

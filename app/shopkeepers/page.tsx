@@ -23,11 +23,9 @@ import {
   AlertTriangle,
   Wrench,
 } from "lucide-react"
-
-// Note: Table components are part of your UI set. If not, replace with simple divs.
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
-type CampaignOption = { id: string; name: string; access_enabled?: boolean; owner_id?: string }
+type CampaignOption = { id: string; name: string; access_enabled?: boolean; dm_id?: string }
 
 type InventoryItem = {
   id: string
@@ -56,7 +54,7 @@ type Shopkeeper = {
 export default function ShopkeepersPage() {
   const router = useRouter()
   const search = useSearchParams()
-  const { user, isLoaded, isSignedIn } = useUser()
+  const { isLoaded, isSignedIn } = useUser()
   const { toast } = useToast()
 
   // Campaign selection
@@ -74,21 +72,23 @@ export default function ShopkeepersPage() {
   const [count, setCount] = useState(5)
   const [sessionId, setSessionId] = useState<string>("")
 
-  // Utility: safe JSON parsing with text fallback
+  // Utility: safe JSON parsing using Response.clone() to avoid "body stream already read"
   const parseJsonSafe = async (res: Response) => {
+    const clone = res.clone()
     try {
-      const data = await res.json()
+      const data = await clone.json()
       return { data, raw: JSON.stringify(data) }
     } catch {
-      const text = await res.text()
-      return { data: null, raw: text }
+      const text = await res.text().catch(() => "")
+      return { data: null as any, raw: text }
     }
   }
 
   const showError = (title: string, errorRaw: string) => {
+    const raw = String(errorRaw || "").slice(0, 2000) // clamp size for toast
     toast({
       title,
-      description: errorRaw,
+      description: raw,
       variant: "destructive",
       className: "bg-red-600 text-white",
       action: (
@@ -271,7 +271,6 @@ export default function ShopkeepersPage() {
     if (!selectedCampaignId) return
     if (!shouldAutoGenerate) return
     if (autoGenTriggered.current) return
-    // optional count override
     const c = Number(search.get("count") || "")
     if (Number.isFinite(c) && c >= 5 && c <= 20) setCount(c)
     autoGenTriggered.current = true
@@ -429,7 +428,7 @@ export default function ShopkeepersPage() {
             ) : (
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {shopkeepers.map((sk) => (
-                  <Card key={sk.id} className="bg-gray-8 00 border-gray-700">
+                  <Card key={sk.id} className="bg-gray-800 border-gray-700">
                     <CardHeader>
                       <CardTitle className="flex items-center justify-between">
                         <span>
@@ -749,7 +748,6 @@ function PlayersGoldEditor({
     setLoading(true)
     ;(async () => {
       try {
-        // Load sessions to discover participants (best-effort)
         const resSessions = await fetch(`/api/sessions?campaignId=${encodeURIComponent(campaignId)}`)
         const sData = await resSessions.json().catch(() => ({}))
         const participants = new Map<string, { name?: string }>()

@@ -16,35 +16,48 @@ export async function GET(_req: NextRequest) {
   const supabase = createAdminClient()
 
   try {
-    // Owned campaigns
+    // Campaigns owned by user (owner_id is the canonical field; dm_id kept as safety)
     const { data: owned, error: ownedErr } = await supabase
       .from("campaigns")
-      .select("id,name,dm_id,access_enabled,created_at")
-      .eq("dm_id", userId)
+      .select("id,name,owner_id,dm_id,access_enabled,created_at")
+      .or(`owner_id.eq.${userId},dm_id.eq.${userId}`)
       .order("created_at", { ascending: false })
-    console.log("[api/campaigns] owned", { reqId, count: owned?.length ?? 0, ownedErr })
 
-    // Campaigns via sessions membership (best-effort if sessions table exists)
+    console.log("[api/campaigns] owned result", {
+      reqId,
+      count: owned?.length ?? 0,
+      ownedErr: ownedErr?.message,
+    })
+
+    // Member campaigns via sessions.participants best-effort
     let memberCampaigns: any[] = []
     const { data: sessions, error: sessErr } = await supabase
       .from("sessions")
       .select("id,campaign_id,participants")
-      .contains("participants", [userId] as any) // participants is expected to be a JSON array
-    console.log("[api/campaigns] sessions", { reqId, count: sessions?.length ?? 0, sessErr })
+      .contains("participants", [userId] as any)
+
+    console.log("[api/campaigns] sessions", {
+      reqId,
+      count: sessions?.length ?? 0,
+      sessErr: sessErr?.message,
+    })
 
     if (!sessErr && sessions && sessions.length) {
       const ids = Array.from(new Set(sessions.map((s) => s.campaign_id).filter(Boolean)))
       if (ids.length) {
         const { data: member, error: memberErr } = await supabase
           .from("campaigns")
-          .select("id,name,dm_id,access_enabled,created_at")
+          .select("id,name,owner_id,dm_id,access_enabled,created_at")
           .in("id", ids)
-        console.log("[api/campaigns] member campaigns", { reqId, count: member?.length ?? 0, memberErr })
+        console.log("[api/campaigns] member campaigns", {
+          reqId,
+          count: member?.length ?? 0,
+          memberErr: memberErr?.message,
+        })
         memberCampaigns = member || []
       }
     }
 
-    // Merge unique by id
     const map = new Map<string, any>()
     for (const c of owned || []) map.set(c.id, c)
     for (const c of memberCampaigns) map.set(c.id, c)

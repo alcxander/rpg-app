@@ -386,7 +386,7 @@ export default function HomePage() {
     const res = await fetch("/api/invite", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ campaignId: selectedCampaignId, userIdToInvite: inviteUserId.trim() }),
+      body: JSON.stringify({ campaignId: selectedCampaignId, userIdToInvite: inviteUserId.trim(), name: user?.primaryEmailAddress?.toString() || "Guest" }),
     })
     const data = await res.json().catch(() => ({}))
     if (res.ok) {

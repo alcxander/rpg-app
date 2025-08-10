@@ -432,7 +432,7 @@ export default function Initiative({
                 onDragOver={onDragOver}
                 onDrop={() => onDrop(id)}
                 className={cn(
-                  "flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between p-2 text-sm bg-gray-800 cursor-grab active:cursor-grabbing",
+                  "flex flex-col gap-2 sm:items-center sm:justify-between p-2 text-sm bg-gray-800 cursor-grab active:cursor-grabbing sm:flex-col",
                   active ? "ring-1 ring-purple-500/60 bg-purple-900/10" : "",
                   dragId === id && "opacity-70",
                 )}
@@ -442,7 +442,7 @@ export default function Initiative({
                 <div className="flex items-center gap-3 min-w-0">
                   <span className={cn("w-2 h-2 rounded-full", c.type === "monster" ? "bg-red-400" : "bg-blue-400")} />
                   <span className="truncate max-w-[12rem]">{c.name}</span>
-                  <span className="text-xs text-gray-400 whitespace-nowrap">
+                  <span className="text-xs text-gray-400 whitespace-nowrap underline">
                     DEX {mods.dex >= 0 ? "+" : ""}
                     {mods.dex}
                   </span>

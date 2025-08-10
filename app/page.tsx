@@ -457,7 +457,7 @@ export default function HomePage() {
       <div className="h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-6 text-center">
         <h1 className="text-2xl font-semibold mb-2">Setting up your account...</h1>
         <p className="text-gray-400 max-w-md mb-4">
-          We’re linking your Clerk profile to the game database. You must exist in our database to use the app.
+          We’re linking your profile to the game database, if you're seeing this sorry just gotta link your profile across systems. It drops sometimes. You must exist in our database to use the app.
         </p>
         {ensureUserError && <p className="text-red-400 text-sm mb-2">{ensureUserError}</p>}
         <Button onClick={() => location.reload()} className="bg-purple-600 hover:bg-purple-700 text-white">
@@ -700,7 +700,7 @@ export default function HomePage() {
               <div className="flex items-center gap-2">
                 <h2 className="text-xl font-semibold text-purple-400">Current Battle</h2>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 max-w-60">
                 <Label className="text-gray-300">Battles</Label>
                 <Select value={sessionState.battle?.id || ""} onValueChange={onSelectBattle}>
                   <SelectTrigger className="bg-gray-700 border-gray-600 text-white w-full max-w-full">

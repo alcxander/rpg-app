@@ -25,8 +25,8 @@ export async function POST(req: NextRequest) {
     const raw = await req.text()
     const body = raw ? JSON.parse(raw) : {}
     const campaignId: string | undefined = body?.campaignId
-    const count: number = Number(body?.count ?? 5)
-    console.log("[api/shopkeepers.generate] body", { reqId, campaignId, count })
+    const requestedCount: number = Number(body?.count ?? 5)
+    console.log("[api/shopkeepers.generate] body", { reqId, campaignId, requestedCount })
 
     if (!campaignId) return NextResponse.json({ error: "campaignId required" }, { status: 400 })
 
@@ -46,10 +46,46 @@ export async function POST(req: NextRequest) {
     if (cErr || !campaign) return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
     if (campaign.owner_id !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
-    const howMany = Math.max(5, Math.min(20, Number.isFinite(count) ? count : 5))
-    console.log("[api/shopkeepers.generate] generating", { reqId, howMany })
+    const safeRequested = Math.max(5, Math.min(20, Number.isFinite(requestedCount) ? requestedCount : 5))
 
-    const generated = generateShopkeepers(howMany)
+    // Count existing active shopkeepers
+    const { data: existing, error: eErr } = await supabase
+      .from("shopkeepers")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .eq("removed", false)
+
+    if (eErr) {
+      console.error("[api/shopkeepers.generate] existing count error", { reqId, message: eErr.message })
+    }
+    const existingCount = (existing as unknown as any)?.length ? (existing as any).length : eErr ? 0 : (existing as any)
+    // Note: Supabase count with head:true puts count on response; Next.js returns undefined here,
+    // so we can safely fetch a second query if count is undefined.
+    let activeCount = Number.isFinite(existingCount) ? Number(existingCount) : 0
+    if (!Number.isFinite(activeCount)) {
+      const { data: rows, error: rcErr } = await supabase
+        .from("shopkeepers")
+        .select("id")
+        .eq("campaign_id", campaignId)
+        .eq("removed", false)
+      if (!rcErr) activeCount = (rows || []).length
+    }
+
+    const missing = Math.max(0, safeRequested - activeCount)
+    console.log("[api/shopkeepers.generate] top-up", { reqId, activeCount, requested: safeRequested, missing })
+
+    if (missing <= 0) {
+      return NextResponse.json({
+        ok: true,
+        created: [],
+        message: "Already have enough active shopkeepers",
+        activeCount,
+        requested: safeRequested,
+        promptUsed: null,
+      })
+    }
+
+    const generated = generateShopkeepers(missing)
     const created: any[] = []
     let idx = 0
 
@@ -62,12 +98,20 @@ export async function POST(req: NextRequest) {
         items: g.items.length,
       })
 
-      const prompt = `Portrait token of a ${g.race} ${g.shop_type} shopkeeper, ${g.description}`
-      const imageUrl = (await generateTokenImage(prompt)) || pick(ENEMY_FALLBACKS)
+      const prompt = `Portrait token of a ${g.race} ${g.shop_type} shopkeeper, ${g.description}. Cinematic soft lighting, fantasy RPG, subtle background, centered head-and-shoulders, 1:1 aspect ratio.`
+      let imageUrl: string | null = null
+      try {
+        imageUrl = await generateTokenImage(prompt)
+      } catch (err: any) {
+        console.error("[api/shopkeepers.generate] image generation error", { reqId, idx, message: err?.message })
+      }
+      if (!imageUrl) {
+        imageUrl = pick(ENEMY_FALLBACKS)
+      }
       console.log("[api/shopkeepers.generate] token image", {
         reqId,
         idx,
-        fallback: !String(imageUrl).startsWith("data:"),
+        source: imageUrl?.startsWith("data:") ? "stability" : "fallback",
       })
 
       const { data: token, error: tErr } = await supabase
@@ -89,6 +133,8 @@ export async function POST(req: NextRequest) {
           description: g.description,
           shop_type: g.shop_type,
           token_id: token?.id ?? null,
+          removed: false,
+          removed_at: null,
         })
         .select("id,name,shop_type,token_id,created_at")
         .single()
@@ -118,13 +164,28 @@ export async function POST(req: NextRequest) {
         })
       }
 
-      created.push({ ...shop, image_url: token?.image_url ?? imageUrl })
+      created.push({
+        ...shop,
+        image_url: token?.image_url ?? imageUrl,
+        image_prompt: prompt,
+        image_provider: imageUrl?.startsWith("data:") ? "stability" : "fallback",
+      })
       console.log("[api/shopkeepers.generate] end", { reqId, idx })
       idx++
     }
 
-    console.log("[api/shopkeepers.generate] done", { reqId, created: created.length })
-    return NextResponse.json({ ok: true, created })
+    console.log("[api/shopkeepers.generate] done", {
+      reqId,
+      created: created.length,
+      requested: safeRequested,
+      activeBefore: activeCount,
+    })
+    return NextResponse.json({
+      ok: true,
+      created,
+      requested: safeRequested,
+      activeBefore: activeCount,
+    })
   } catch (e: any) {
     console.error("[api/shopkeepers.generate] exception", { reqId, message: e?.message })
     return NextResponse.json({ error: e?.message || "Internal Server Error" }, { status: 500 })

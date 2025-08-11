@@ -1,5 +1,5 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
+import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server"
+import { NextResponse } from "next/server"
 
 // Public routes that do NOT require auth:
 const isPublicRoute = createRouteMatcher([
@@ -7,34 +7,33 @@ const isPublicRoute = createRouteMatcher([
   "/sign-up(.*)",
   // Allow this server-to-server call without auth:
   "/api/generate-map",
-]);
+])
 
-export default clerkMiddleware((auth, req) => {
-  const { pathname } = req.nextUrl;
+export default clerkMiddleware(async (auth, req) => {
+  const { pathname } = req.nextUrl
 
-  // Log to confirm middleware is running for this path.
-  // You can comment this out later if it gets too noisy.
-  console.log("[MW] hit", { pathname });
+  // Helpful debug to verify middleware is hit for every request (remove later if noisy)
+  console.log("[MW] hit", { pathname })
 
-  // Always initialize auth to attach Clerk request state for downstream getAuth/auth calls.
-  const a = auth();
-
-  // Public routes continue without protection.
+  // Skip protection for public routes
   if (isPublicRoute(req)) {
-    return NextResponse.next();
+    return NextResponse.next()
   }
 
-  // Protect everything else, including /api/campaigns and /shopkeepers.
-  a.protect();
-  return NextResponse.next();
-});
+  // Protect everything else (includes /, /shopkeepers, and all /api/*)
+  // NOTE: In your Clerk version, protect() is on the auth object passed into the callback
+  await auth.protect()
 
-// Match all app and API routes; skip Next internals and static assets.
+  return NextResponse.next()
+})
+
+// Ensure middleware runs for app pages and API routes; skip static files and Next internals
 export const config = {
   matcher: [
-    // All routes except: - files with an extension - _next (internals) - favicon
-    "/((?!.+\\.[\\w]+$|_next).*)",
-    // And always include API and TRPC explicitly:
+    // All routes except files with an extension and Next internals
+    "/((?!.*\\..*|_next).*)",
+    "/",
+    // Explicitly include API/TRPC
     "/(api|trpc)(.*)",
   ],
-};
+}

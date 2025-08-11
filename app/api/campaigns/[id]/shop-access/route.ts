@@ -1,4 +1,4 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { NextResponse, type NextRequest } from "next/server"
 import { getAuth } from "@clerk/nextjs/server"
 import { createAdminClient } from "@/lib/supabaseAdmin"
 
@@ -8,32 +8,35 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const reqId = rid()
   const { userId, sessionId } = getAuth(req)
   const campaignId = params.id
-  console.log("[api/campaigns.shop-access] start", { reqId, campaignId, hasUser: !!userId, sessionId })
+  console.log("[api/campaigns.shop-access] start", { reqId, hasUser: !!userId, sessionId, campaignId })
 
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  if (!campaignId) return NextResponse.json({ error: "campaignId required" }, { status: 400 })
 
   try {
-    const { access_enabled } = (await req.json().catch(() => ({}))) as { access_enabled?: boolean }
+    const body = await req.json().catch(() => ({}))
+    const access_enabled: boolean | undefined = body?.access_enabled
     if (typeof access_enabled !== "boolean") {
       return NextResponse.json({ error: "access_enabled boolean required" }, { status: 400 })
     }
 
     const supabase = createAdminClient()
+
     const { data: campaign, error: cErr } = await supabase
       .from("campaigns")
       .select("id,name,owner_id,access_enabled")
       .eq("id", campaignId)
       .single()
 
-    console.log("[api/campaigns.shop-access] lookup", {
-      reqId,
-      found: !!campaign,
-      err: cErr?.message || null,
-      owner_id: campaign?.owner_id,
-    })
+    if (cErr || !campaign) {
+      console.warn("[api/campaigns.shop-access] campaign not found", { reqId, message: cErr?.message })
+      return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
+    }
 
-    if (cErr || !campaign) return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
-    if (campaign.owner_id !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    if (campaign.owner_id !== userId) {
+      console.warn("[api/campaigns.shop-access] forbidden (not owner)", { reqId, owner_id: campaign.owner_id })
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    }
 
     const { data: updated, error: uErr } = await supabase
       .from("campaigns")
@@ -42,15 +45,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       .select("id,name,owner_id,access_enabled")
       .single()
 
-    console.log("[api/campaigns.shop-access] update", {
-      reqId,
-      err: uErr?.message || null,
-      access_enabled: updated?.access_enabled,
-    })
+    if (uErr || !updated) {
+      console.error("[api/campaigns.shop-access] update error", { reqId, message: uErr?.message })
+      return NextResponse.json({ error: "Failed to update access" }, { status: 500 })
+    }
 
-    if (uErr || !updated) return NextResponse.json({ error: "Update failed" }, { status: 500 })
-
-    return NextResponse.json({ ok: true, campaign: { ...updated, isOwner: true } })
+    console.log("[api/campaigns.shop-access] done", { reqId, access_enabled: updated.access_enabled })
+    return NextResponse.json({ campaign: { ...updated, isOwner: true } })
   } catch (e: any) {
     console.error("[api/campaigns.shop-access] exception", { reqId, message: e?.message })
     return NextResponse.json({ error: e?.message || "Internal Server Error" }, { status: 500 })

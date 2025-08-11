@@ -22,8 +22,7 @@ export async function POST(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   try {
-    const raw = await req.text()
-    const body = raw ? JSON.parse(raw) : {}
+    const body = await req.json().catch(() => ({}))
     const campaignId: string | undefined = body?.campaignId
     const requestedCount: number = Number(body?.count ?? 1)
     console.log("[api/shopkeepers.generate] body", { reqId, campaignId, requestedCount })
@@ -32,53 +31,67 @@ export async function POST(req: NextRequest) {
 
     const supabase = createAdminClient()
 
-    // Ownership check (owner_id is DM)
+    // Ownership
     const { data: campaign, error: cErr } = await supabase
       .from("campaigns")
-      .select("id,name,owner_id,access_enabled")
+      .select("id,name,owner_id")
       .eq("id", campaignId)
       .single()
-    console.log("[api/shopkeepers.generate] campaign", {
-      reqId,
-      error: cErr?.message || null,
-      owner_id: campaign?.owner_id,
-    })
-    if (cErr || !campaign) return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
-    if (campaign.owner_id !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+
+    if (cErr || !campaign) {
+      console.warn("[api/shopkeepers.generate] campaign not found", { reqId, message: cErr?.message })
+      return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
+    }
+    if (campaign.owner_id !== userId) {
+      console.warn("[api/shopkeepers.generate] forbidden (not owner)", { reqId })
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    }
 
     const safeRequested = Math.max(1, Math.min(20, Number.isFinite(requestedCount) ? requestedCount : 1))
 
-    // Count existing active shopkeepers
-    const { count: activeCount, error: countErr } = await supabase
-      .from("shopkeepers")
-      .select("id", { count: "exact", head: true })
-      .eq("campaign_id", campaignId)
-      .eq("removed", false)
+    // Count active; if "removed" column missing, count without it
+    let activeCount = 0
+    {
+      const { count, error } = await supabase
+        .from("shopkeepers")
+        .select("id", { count: "exact", head: true })
+        .eq("campaign_id", campaignId)
+        .eq("removed", false)
 
-    console.log("[api/shopkeepers.generate] top-up pre", {
-      reqId,
-      activeCount: activeCount ?? 0,
-      requested: safeRequested,
-      countErr: countErr?.message || null,
-    })
+      if (error && String(error.message).toLowerCase().includes("removed")) {
+        const { count: c2, error: e2 } = await supabase
+          .from("shopkeepers")
+          .select("id", { count: "exact", head: true })
+          .eq("campaign_id", campaignId)
+        activeCount = c2 ?? 0
+        if (e2) console.error("[api/shopkeepers.generate] count fallback error", { reqId, message: e2.message })
+      } else {
+        activeCount = count ?? 0
+        if (error) console.error("[api/shopkeepers.generate] count error", { reqId, message: error.message })
+      }
+    }
 
-    const missing = Math.max(0, safeRequested - (activeCount ?? 0))
+    const missing = Math.max(0, safeRequested - activeCount)
+    console.log("[api/shopkeepers.generate] top-up", { reqId, activeCount, requested: safeRequested, missing })
+
     if (missing <= 0) {
       return NextResponse.json({
         ok: true,
-        created: [],
-        message: "Already have enough active shopkeepers",
-        activeCount: activeCount ?? 0,
+        createdCount: 0,
         requested: safeRequested,
+        activeBefore: activeCount,
+        message: "Already have enough active shopkeepers",
       })
     }
 
-    console.log("[api/shopkeepers.generate] generating", { reqId, missing })
     const generated = generateShopkeepers(missing)
-    const created: any[] = []
-    let idx = 0
+    const createdIds: string[] = []
+    let tokenInsertErrors = 0
+    let shopInsertErrors = 0
+    let invInsertErrors = 0
 
-    for (const g of generated) {
+    for (let idx = 0; idx < generated.length; idx++) {
+      const g = generated[idx]
       console.log("[api/shopkeepers.generate] begin", {
         reqId,
         idx,
@@ -92,49 +105,70 @@ export async function POST(req: NextRequest) {
       try {
         imageUrl = await generateTokenImage(prompt)
       } catch (err: any) {
-        console.error("[api/shopkeepers.generate] image generation error", { reqId, idx, message: err?.message })
+        console.error("[api/shopkeepers.generate] stability error", { reqId, idx, message: err?.message })
       }
       if (!imageUrl) imageUrl = pick(ENEMY_FALLBACKS)
-      console.log("[api/shopkeepers.generate] token image", {
-        reqId,
-        idx,
-        source: imageUrl?.startsWith("data:") ? "stability" : "fallback",
-      })
 
       const { data: token, error: tErr } = await supabase
         .from("tokens")
         .insert({ type: "shopkeeper", image_url: imageUrl, description: prompt, campaign_id: campaignId })
-        .select("id,image_url")
+        .select("id")
         .single()
-      console.log("[api/shopkeepers.generate] token insert", { reqId, idx, tokenId: token?.id, error: tErr?.message })
-
-      const { data: shop, error: sErr } = await supabase
-        .from("shopkeepers")
-        .insert({
-          campaign_id: campaignId,
-          name: g.name,
-          race: g.race,
-          age: g.age,
-          alignment: g.alignment,
-          quote: g.quote,
-          description: g.description,
-          shop_type: g.shop_type,
-          token_id: token?.id ?? null,
-          removed: false,
-          removed_at: null,
-        })
-        .select("id,name,shop_type,token_id,created_at")
-        .single()
-      console.log("[api/shopkeepers.generate] shop insert", { reqId, idx, shopId: shop?.id, error: sErr?.message })
-
-      if (sErr || !shop) {
-        idx++
+      if (tErr || !token) {
+        tokenInsertErrors++
+        console.error("[api/shopkeepers.generate] token insert error", { reqId, idx, message: tErr?.message })
         continue
       }
 
-      if (g.items.length) {
+      // Insert shopkeeper. Try with removed fields; on 42703-like message, retry without.
+      const baseShop = {
+        campaign_id: campaignId,
+        name: g.name,
+        race: g.race,
+        age: g.age,
+        alignment: g.alignment,
+        quote: g.quote,
+        description: g.description,
+        shop_type: g.shop_type,
+        token_id: token.id as string,
+      }
+
+      let shopId: string | null = null
+      {
+        const { data: shop1, error: sErr1 } = await supabase
+          .from("shopkeepers")
+          .insert({ ...baseShop, removed: false, removed_at: null })
+          .select("id")
+          .single()
+
+        if (sErr1 && String(sErr1.message).toLowerCase().includes("removed")) {
+          const { data: shop2, error: sErr2 } = await supabase
+            .from("shopkeepers")
+            .insert(baseShop)
+            .select("id")
+            .single()
+          if (sErr2 || !shop2) {
+            shopInsertErrors++
+            console.error("[api/shopkeepers.generate] shop insert error (fallback)", {
+              reqId,
+              idx,
+              message: sErr2?.message,
+            })
+            continue
+          }
+          shopId = shop2.id as string
+        } else if (sErr1 || !shop1) {
+          shopInsertErrors++
+          console.error("[api/shopkeepers.generate] shop insert error", { reqId, idx, message: sErr1?.message })
+          continue
+        } else {
+          shopId = shop1.id as string
+        }
+      }
+
+      if (g.items.length && shopId) {
         const invRows = g.items.map((it) => ({
-          shopkeeper_id: shop.id,
+          shopkeeper_id: shopId!,
           item_name: it.item_name,
           rarity: it.rarity,
           base_price: it.base_price,
@@ -143,35 +177,35 @@ export async function POST(req: NextRequest) {
           stock_quantity: it.stock_quantity,
         }))
         const { error: iErr } = await supabase.from("shop_inventory").insert(invRows)
-        console.log("[api/shopkeepers.generate] inventory insert", {
-          reqId,
-          idx,
-          rows: invRows.length,
-          error: iErr?.message || null,
-        })
+        if (iErr) {
+          invInsertErrors++
+          console.error("[api/shopkeepers.generate] inventory insert error", { reqId, idx, message: iErr.message })
+        }
       }
 
-      created.push({
-        ...shop,
-        image_url: token?.image_url ?? imageUrl,
-        image_prompt: prompt,
-        image_provider: imageUrl?.startsWith("data:") ? "stability" : "fallback",
-      })
-      console.log("[api/shopkeepers.generate] end", { reqId, idx })
-      idx++
+      if (shopId) createdIds.push(shopId)
+      console.log("[api/shopkeepers.generate] end", { reqId, idx, shopId })
     }
 
     console.log("[api/shopkeepers.generate] done", {
       reqId,
-      created: created.length,
+      createdCount: createdIds.length,
       requested: safeRequested,
-      activeBefore: activeCount ?? 0,
+      activeBefore: activeCount,
+      tokenInsertErrors,
+      shopInsertErrors,
+      invInsertErrors,
     })
+
     return NextResponse.json({
       ok: true,
-      created,
+      createdCount: createdIds.length,
+      createdIds,
       requested: safeRequested,
-      activeBefore: activeCount ?? 0,
+      activeBefore: activeCount,
+      tokenInsertErrors,
+      shopInsertErrors,
+      invInsertErrors,
     })
   } catch (e: any) {
     console.error("[api/shopkeepers.generate] exception", { reqId, message: e?.message })

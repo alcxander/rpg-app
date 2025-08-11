@@ -1,34 +1,37 @@
-import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
+import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
 
-// Define which routes should be protected by Clerk middleware.
-// These are the routes that *require* an authenticated user.
-// The sign-in and sign-up pages are intentionally *not* included here,
-// as Clerk's middleware will automatically redirect unauthenticated users to them.
+// Define which routes should be protected.
+// You can refine these based on your app surface area.
 const isProtectedRoute = createRouteMatcher([
-  '/', // Protect the main application page
-  '/api(.*)', // Protect all API routes
-  // Add any other routes that require authentication here, e.g., '/dashboard(.*)'
+  "/",
+  "/shopkeepers(.*)",
+  "/api(.*)",
 ]);
 
-export default clerkMiddleware(async (auth, req) => {
-  const pathname = req.nextUrl.pathname
+export default clerkMiddleware((auth, req) => {
+  const { pathname } = req.nextUrl;
+
+  // Always initialize auth() so Clerk attaches request metadata for getAuth().
+  const a = auth();
 
   // Allow map generation route without auth (server-to-server calls)
-  if (pathname === '/api/generate-map') {
-    return
+  if (pathname === "/api/generate-map") {
+    return NextResponse.next();
   }
 
   if (isProtectedRoute(req)) {
-    await auth.protect()
+    a.protect();
   }
+
+  // Explicitly continue
+  return NextResponse.next();
 });
 
 export const config = {
+  // Run middleware for app pages and API routes; skip static files and Next internals
   matcher: [
-    // Match all routes except static files and /_next/
-    // This ensures Clerk's middleware runs for all relevant paths.
-    '/((?!.*\\..*|_next).*)',
-    '/',
-    '/(api|trpc)(.*)',
+    "/((?!_next|static|.*\\..*|favicon.ico).*)",
+    "/(api|trpc)(.*)",
   ],
 };

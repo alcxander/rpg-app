@@ -1,12 +1,13 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getAuth } from "@clerk/nextjs/server"
-import { createAdminClient } from "@/lib/supabaseAdmin"
+import { getAuth } from "path/to/getAuth" // Replace with actual import path
+import { createAdminClient } from "path/to/createAdminClient" // Replace with actual import path
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const reqId = Math.random().toString(36).substring(2, 8)
 
   try {
-    console.log("[api/shopkeepers/inventory] PATCH start", { reqId, inventoryId: params.id })
+    const { id } = params
+    console.log("[api/shopkeepers/inventory] PATCH start", { reqId, inventoryId: id })
 
     const { userId } = getAuth(req)
     if (!userId) {
@@ -33,7 +34,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
           campaigns!inner(owner_id)
         )
       `)
-      .eq("id", params.id)
+      .eq("id", id)
       .single()
 
     if (inventoryError || !inventory) {
@@ -60,7 +61,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const { data: updatedInventory, error: updateError } = await supabase
       .from("shopkeeper_inventory")
       .update({ quantity: newQuantity })
-      .eq("id", params.id)
+      .eq("id", id)
       .select()
       .single()
 
@@ -71,7 +72,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     console.log("[api/shopkeepers/inventory] PATCH done", {
       reqId,
-      inventoryId: params.id,
+      inventoryId: id,
       action,
       oldQuantity: currentQuantity,
       newQuantity,

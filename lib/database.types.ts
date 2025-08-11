@@ -369,8 +369,11 @@ export type Database = {
           alignment: string | null
           quote: string | null
           description: string | null
-          shop_type: "potion" | "arcana" | "blacksmith" | "general" | "custom"
+          shop_type: string // Changed from enum to string for flexibility
           token_id: string | null
+          image_url: string | null // Added image_url field
+          removed: boolean | null // Added removed field for soft delete
+          removed_at: string | null // Added removed_at timestamp
           created_at: string
         }
         Insert: {
@@ -382,8 +385,11 @@ export type Database = {
           alignment?: string | null
           quote?: string | null
           description?: string | null
-          shop_type: "potion" | "arcana" | "blacksmith" | "general" | "custom"
+          shop_type: string // Changed from enum to string
           token_id?: string | null
+          image_url?: string | null // Added image_url field
+          removed?: boolean | null // Added removed field
+          removed_at?: string | null // Added removed_at field
           created_at?: string | null
         }
         Update: {
@@ -395,8 +401,11 @@ export type Database = {
           alignment?: string | null
           quote?: string | null
           description?: string | null
-          shop_type?: "potion" | "arcana" | "blacksmith" | "general" | "custom"
+          shop_type?: string // Changed from enum to string
           token_id?: string | null
+          image_url?: string | null // Added image_url field
+          removed?: boolean | null // Added removed field
+          removed_at?: string | null // Added removed_at field
           created_at?: string | null
         }
         Relationships: [
@@ -412,6 +421,53 @@ export type Database = {
             columns: ["token_id"]
             isOneToOne: false
             referencedRelation: "tokens"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      shopkeeper_inventory: {
+        Row: {
+          id: string
+          shopkeeper_id: string
+          item_name: string
+          rarity: string
+          base_price: number
+          price_adjustment_percent: number
+          final_price: number
+          stock_quantity: number
+          quantity: number // Added quantity field for inventory controls
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          shopkeeper_id: string
+          item_name: string
+          rarity: string
+          base_price: number
+          price_adjustment_percent?: number
+          final_price: number
+          stock_quantity?: number
+          quantity?: number // Added quantity field
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          shopkeeper_id?: string
+          item_name?: string
+          rarity?: string
+          base_price?: number
+          price_adjustment_percent?: number
+          final_price?: number
+          stock_quantity?: number
+          quantity?: number // Added quantity field
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shopkeeper_inventory_shopkeeper_id_fkey"
+            columns: ["shopkeeper_id"]
+            isOneToOne: false
+            referencedRelation: "shopkeepers"
             referencedColumns: ["id"]
           },
         ]

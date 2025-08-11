@@ -1,6 +1,6 @@
 // lib/supabaseClient.ts
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import type { Database } from './database.types'
+import { createClient, type SupabaseClient } from "@supabase/supabase-js"
+import type { Database } from "./database.types.ts"
 
 // Single client instance to avoid multiple GoTrueClient warnings
 let browserClientSingleton: SupabaseClient<Database> | null = null
@@ -10,7 +10,9 @@ let currentAuthToken: string | null = null
 export const createBrowserClient = () => {
   if (!browserClientSingleton) {
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      throw new Error('Missing Supabase client-side environment variables: NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY')
+      throw new Error(
+        "Missing Supabase client-side environment variables: NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY",
+      )
     }
     browserClientSingleton = createClient<Database>(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -21,7 +23,7 @@ export const createBrowserClient = () => {
           fetch: async (url, init = {}) => {
             const headers = new Headers(init.headers || {})
             if (currentAuthToken) {
-              headers.set('Authorization', `Bearer ${currentAuthToken}`)
+              headers.set("Authorization", `Bearer ${currentAuthToken}`)
             }
             return fetch(url, { ...init, headers })
           },
@@ -32,7 +34,7 @@ export const createBrowserClient = () => {
           persistSession: false,
           detectSessionInUrl: false,
         },
-      }
+      },
     )
   }
   return browserClientSingleton

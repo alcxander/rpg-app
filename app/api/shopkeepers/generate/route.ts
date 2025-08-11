@@ -10,7 +10,40 @@ const ENEMY_FALLBACKS = [
   "/tokens/enemies/4.png",
   "/tokens/enemies/5.png",
 ]
-const SHOP_TYPES = ["blacksmith", "general", "apothecary", "fletcher", "enchanter"] as const
+
+const SHOP_TYPES = [
+  "blacksmith",
+  "general",
+  "apothecary",
+  "fletcher",
+  "enchanter",
+  "tavern",
+  "bakery",
+  "jeweler",
+  "tailor",
+  "weaponsmith",
+  "armorsmith",
+  "alchemist",
+  "bookstore",
+  "inn",
+  "stable",
+  "temple",
+  "magic shop",
+  "curiosities",
+  "herbalist",
+  "leatherworker",
+  "carpenter",
+  "mason",
+  "tinker",
+  "scribe",
+  "cartographer",
+  "fishmonger",
+  "butcher",
+  "grocer",
+  "florist",
+  "clockmaker",
+] as const
+
 const RACES = ["Human", "Elf", "Dwarf", "Halfling", "Tiefling", "Gnome"] as const
 const ALIGNMENTS = ["LG", "NG", "CG", "LN", "N", "CN", "LE", "NE", "CE"] as const
 

@@ -31,13 +31,12 @@ export async function POST(req: NextRequest) {
 
     const supabase = createAdminClient()
 
-    // Ownership
+    // Ownership check
     const { data: campaign, error: cErr } = await supabase
       .from("campaigns")
       .select("id,name,owner_id")
       .eq("id", campaignId)
       .single()
-
     if (cErr || !campaign) {
       console.warn("[api/shopkeepers.generate] campaign not found", { reqId, message: cErr?.message })
       return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
@@ -49,7 +48,7 @@ export async function POST(req: NextRequest) {
 
     const safeRequested = Math.max(1, Math.min(20, Number.isFinite(requestedCount) ? requestedCount : 1))
 
-    // Count active; if "removed" column missing, count without it
+    // Count existing active shopkeepers, with fallback if "removed" column doesn’t exist
     let activeCount = 0
     {
       const { count, error } = await supabase
@@ -72,12 +71,13 @@ export async function POST(req: NextRequest) {
     }
 
     const missing = Math.max(0, safeRequested - activeCount)
-    console.log("[api/shopkeepers.generate] top-up", { reqId, activeCount, requested: safeRequested, missing })
+    console.log("[api/shopkeepers.generate] top-up", { reqId, requested: safeRequested, activeCount, missing })
 
     if (missing <= 0) {
       return NextResponse.json({
         ok: true,
         createdCount: 0,
+        createdIds: [],
         requested: safeRequested,
         activeBefore: activeCount,
         message: "Already have enough active shopkeepers",
@@ -101,6 +101,7 @@ export async function POST(req: NextRequest) {
       })
 
       const prompt = `Portrait token of a ${g.race} ${g.shop_type} shopkeeper, ${g.description}. Cinematic soft lighting, fantasy RPG, subtle background, centered head-and-shoulders, 1:1 aspect ratio.`
+
       let imageUrl: string | null = null
       try {
         imageUrl = await generateTokenImage(prompt)
@@ -109,6 +110,7 @@ export async function POST(req: NextRequest) {
       }
       if (!imageUrl) imageUrl = pick(ENEMY_FALLBACKS)
 
+      // token
       const { data: token, error: tErr } = await supabase
         .from("tokens")
         .insert({ type: "shopkeeper", image_url: imageUrl, description: prompt, campaign_id: campaignId })
@@ -120,7 +122,7 @@ export async function POST(req: NextRequest) {
         continue
       }
 
-      // Insert shopkeeper. Try with removed fields; on 42703-like message, retry without.
+      // shopkeeper
       const baseShop = {
         campaign_id: campaignId,
         name: g.name,
@@ -166,6 +168,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // inventory
       if (g.items.length && shopId) {
         const invRows = g.items.map((it) => ({
           shopkeeper_id: shopId!,
@@ -197,6 +200,7 @@ export async function POST(req: NextRequest) {
       invInsertErrors,
     })
 
+    // Important: respond with a small payload (no base64s)
     return NextResponse.json({
       ok: true,
       createdCount: createdIds.length,

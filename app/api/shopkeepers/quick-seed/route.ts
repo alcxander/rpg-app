@@ -6,184 +6,193 @@ const rid = () => Math.random().toString(36).slice(2, 8)
 
 export async function POST(req: NextRequest) {
   const reqId = rid()
-  const { userId } = getAuth(req)
+  const { userId, sessionId } = getAuth(req)
+  console.log("[api/shopkeepers.quick-seed] start", { reqId, hasUser: !!userId, sessionId })
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   try {
-    const body = await req.json().catch(() => ({}))
-    const campaignId: string | undefined = body?.campaignId
+    const { campaignId } = await req.json().catch(() => ({ campaignId: undefined }))
     if (!campaignId) return NextResponse.json({ error: "campaignId required" }, { status: 400 })
 
     const supabase = createAdminClient()
 
-    // Ownership
+    // Ownership check
     const { data: campaign, error: cErr } = await supabase
       .from("campaigns")
-      .select("id,owner_id")
+      .select("id,name,owner_id")
       .eq("id", campaignId)
       .single()
     if (cErr || !campaign) return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
     if (campaign.owner_id !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
-    // Pull a pool of existing active shopkeepers (any campaign), fallback if 'removed' column missing
-    let pool:
-      | {
-          id: string
-          name: string
-          race: string
-          age: number
-          alignment: string
-          quote: string
-          description: string
-          shop_type: string
-          token_id: string | null
-        }[]
-      | null = null
-    {
-      const { data, error } = await supabase
-        .from("shopkeepers")
-        .select("id,name,race,age,alignment,quote,description,shop_type,token_id")
-        .eq("removed", false)
-        .order("created_at", { ascending: false })
-        .limit(50)
-      if (error && String(error.message).toLowerCase().includes("removed")) {
-        const { data: d2, error: e2 } = await supabase
-          .from("shopkeepers")
-          .select("id,name,race,age,alignment,quote,description,shop_type,token_id")
-          .order("created_at", { ascending: false })
-          .limit(50)
-        pool = d2 || []
-        if (e2) console.error("[api/shopkeepers.quick-seed] pool fallback error", { reqId, message: e2.message })
-      } else {
-        pool = data || []
-        if (error) console.error("[api/shopkeepers.quick-seed] pool error", { reqId, message: error.message })
-      }
+    // Load a pool of shopkeepers from other campaigns (active ones)
+    const { data: pool, error: pErr } = await supabase
+      .from("shopkeepers")
+      .select("id,campaign_id,name,race,age,alignment,quote,description,shop_type,token_id")
+      .neq("campaign_id", campaignId)
+      .limit(50)
+    if (pErr) {
+      console.error("[api/shopkeepers.quick-seed] pool error", { reqId, message: pErr.message })
+      return NextResponse.json({ error: "Failed to load pool" }, { status: 500 })
     }
 
-    if (!pool || pool.length === 0) {
-      return NextResponse.json({ error: "No source shopkeepers to seed from" }, { status: 404 })
+    // Shuffle and pick 5
+    const list = [...(pool || [])]
+    for (let i = list.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[list[i], list[j]] = [list[j], list[i]]
+    }
+    const picks = list.slice(0, Math.min(5, list.length))
+
+    // If pool is empty, short-circuit
+    if (!picks.length) {
+      return NextResponse.json({
+        ok: true,
+        createdCount: 0,
+        createdIds: [],
+        message: "No global shopkeepers available to seed",
+      })
     }
 
-    // Pick up to 5 random
-    const shuffled = [...pool].sort(() => Math.random() - 0.5)
-    const selected = shuffled.slice(0, 5)
-
-    const tokenIds = selected.map((s) => s.token_id).filter(Boolean) as string[]
+    // Load tokens for picks
+    const tokenIds = picks.map((p) => p.token_id).filter(Boolean) as string[]
     let tokenMap = new Map<string, { image_url: string | null; description: string | null }>()
     if (tokenIds.length) {
       const { data: tokens, error: tErr } = await supabase
         .from("tokens")
         .select("id,image_url,description")
         .in("id", tokenIds)
-      if (tErr) {
-        console.error("[api/shopkeepers.quick-seed] tokens error", { reqId, message: tErr.message })
-      } else if (tokens) {
+      if (tokens)
         tokenMap = new Map(tokens.map((t) => [String(t.id), { image_url: t.image_url, description: t.description }]))
+      if (tErr) console.error("[api/shopkeepers.quick-seed] tokens error", { reqId, message: tErr.message })
+    }
+
+    // Load inventory rows for picks
+    const pickIds = picks.map((p) => p.id)
+    const invMap = new Map<string, any[]>()
+    if (pickIds.length) {
+      const { data: inv, error: iErr } = await supabase
+        .from("shop_inventory")
+        .select("id,shopkeeper_id,item_name,rarity,base_price,price_adjustment_percent,final_price,stock_quantity")
+        .in("shopkeeper_id", pickIds)
+      if (inv) {
+        for (const row of inv) {
+          const arr = invMap.get(row.shopkeeper_id) || []
+          arr.push(row)
+          invMap.set(row.shopkeeper_id, arr)
+        }
       }
+      if (iErr) console.error("[api/shopkeepers.quick-seed] inventory error", { reqId, message: iErr.message })
     }
 
-    // Inventories of selected
-    const selectedIds = selected.map((s) => s.id)
-    const { data: inv, error: iErr } = await supabase
-      .from("shop_inventory")
-      .select(
-        "id,shopkeeper_id,item_name,rarity,base_price,price_adjustment_percent,final_price,stock_quantity,created_at",
-      )
-      .in("shopkeeper_id", selectedIds)
-    if (iErr) console.error("[api/shopkeepers.quick-seed] inventory error", { reqId, message: iErr.message })
-    const invByShop = new Map<string, any[]>()
-    for (const r of inv || []) {
-      const arr = invByShop.get(r.shopkeeper_id) || []
-      arr.push(r)
-      invByShop.set(r.shopkeeper_id, arr)
-    }
+    // Clone each pick into this campaign
+    const createdIds: string[] = []
+    for (let idx = 0; idx < picks.length; idx++) {
+      const p = picks[idx]
 
-    let created = 0
-    for (let idx = 0; idx < selected.length; idx++) {
-      const src = selected[idx]
-      // Duplicate token for this campaign to keep references separate
-      let newTokenId: string | null = null
-      if (src.token_id) {
-        const t = tokenMap.get(String(src.token_id))
-        const { data: newToken, error: nErr } = await supabase
+      // duplicate token row (so campaign filters still work)
+      let tokenId: string | null = null
+      {
+        const tok = p.token_id ? tokenMap.get(String(p.token_id)) : null
+        const { data: newTok, error: ntErr } = await supabase
           .from("tokens")
           .insert({
             type: "shopkeeper",
-            image_url: t?.image_url ?? null,
-            description: t?.description ?? null,
+            image_url: tok?.image_url ?? null,
+            description: tok?.description ?? null,
             campaign_id: campaignId,
           })
           .select("id")
           .single()
-        if (nErr) {
-          console.error("[api/shopkeepers.quick-seed] token clone error", { reqId, idx, message: nErr.message })
-        } else {
-          newTokenId = newToken?.id ?? null
+        if (ntErr || !newTok) {
+          console.error("[api/shopkeepers.quick-seed] token clone error", { reqId, idx, message: ntErr?.message })
+          continue
         }
+        tokenId = newTok.id as string
       }
 
-      // Insert new shopkeeper
-      const baseShop = {
-        campaign_id: campaignId,
-        name: src.name,
-        race: src.race,
-        age: src.age,
-        alignment: src.alignment,
-        quote: src.quote,
-        description: src.description,
-        shop_type: src.shop_type,
-        token_id: newTokenId,
-      }
+      // insert cloned shopkeeper
+      const { data: newSk, error: sErr } = await supabase
+        .from("shopkeepers")
+        .insert({
+          campaign_id: campaignId,
+          name: p.name,
+          race: p.race,
+          age: p.age,
+          alignment: p.alignment,
+          quote: p.quote,
+          description: p.description,
+          shop_type: p.shop_type,
+          token_id: tokenId,
+          removed: false,
+          removed_at: null,
+        })
+        .select("id")
+        .single()
 
-      let shopId: string | null = null
-      {
-        const { data: s1, error: e1 } = await supabase
+      if (sErr && String(sErr.message).toLowerCase().includes("removed")) {
+        const { data: newSk2, error: sErr2 } = await supabase
           .from("shopkeepers")
-          .insert({ ...baseShop, removed: false, removed_at: null })
+          .insert({
+            campaign_id: campaignId,
+            name: p.name,
+            race: p.race,
+            age: p.age,
+            alignment: p.alignment,
+            quote: p.quote,
+            description: p.description,
+            shop_type: p.shop_type,
+            token_id: tokenId,
+          })
           .select("id")
           .single()
-        if (e1 && String(e1.message).toLowerCase().includes("removed")) {
-          const { data: s2, error: e2 } = await supabase.from("shopkeepers").insert(baseShop).select("id").single()
-          if (e2 || !s2) {
-            console.error("[api/shopkeepers.quick-seed] shop insert fallback error", {
-              reqId,
-              idx,
-              message: e2?.message,
-            })
-            continue
-          }
-          shopId = s2.id as string
-        } else if (e1 || !s1) {
-          console.error("[api/shopkeepers.quick-seed] shop insert error", { reqId, idx, message: e1?.message })
+        if (sErr2 || !newSk2) {
+          console.error("[api/shopkeepers.quick-seed] shop clone error (fallback)", {
+            reqId,
+            idx,
+            message: sErr2?.message,
+          })
           continue
-        } else {
-          shopId = s1.id as string
         }
-      }
+        createdIds.push(newSk2.id as string)
 
-      // Copy inventory
-      if (shopId) {
-        const rows = (invByShop.get(src.id) || []).map((it) => ({
-          shopkeeper_id: shopId!,
-          item_name: it.item_name,
-          rarity: it.rarity,
-          base_price: it.base_price,
-          price_adjustment_percent: it.price_adjustment_percent,
-          final_price: it.final_price,
-          stock_quantity: it.stock_quantity,
-        }))
-        if (rows.length) {
-          const { error: iErr2 } = await supabase.from("shop_inventory").insert(rows)
-          if (iErr2) {
-            console.error("[api/shopkeepers.quick-seed] inventory insert error", { reqId, idx, message: iErr2.message })
-          }
+        // clone inventory
+        const srcItems = invMap.get(p.id) || []
+        if (srcItems.length) {
+          const rows = srcItems.map((r) => ({
+            shopkeeper_id: newSk2.id as string,
+            item_name: r.item_name,
+            rarity: r.rarity,
+            base_price: r.base_price,
+            price_adjustment_percent: r.price_adjustment_percent,
+            final_price: r.final_price,
+            stock_quantity: r.stock_quantity,
+          }))
+          await supabase.from("shop_inventory").insert(rows)
         }
-        created++
+      } else if (sErr || !newSk) {
+        console.error("[api/shopkeepers.quick-seed] shop clone error", { reqId, idx, message: sErr?.message })
+        continue
+      } else {
+        createdIds.push(newSk.id as string)
+        const srcItems = invMap.get(p.id) || []
+        if (srcItems.length) {
+          const rows = srcItems.map((r) => ({
+            shopkeeper_id: newSk.id as string,
+            item_name: r.item_name,
+            rarity: r.rarity,
+            base_price: r.base_price,
+            price_adjustment_percent: r.price_adjustment_percent,
+            final_price: r.final_price,
+            stock_quantity: r.stock_quantity,
+          }))
+          await supabase.from("shop_inventory").insert(rows)
+        }
       }
     }
 
-    console.log("[api/shopkeepers.quick-seed] done", { reqId, created })
-    return NextResponse.json({ ok: true, created })
+    console.log("[api/shopkeepers.quick-seed] done", { reqId, createdCount: createdIds.length })
+    return NextResponse.json({ ok: true, createdCount: createdIds.length, createdIds })
   } catch (e: any) {
     console.error("[api/shopkeepers.quick-seed] exception", { reqId, message: e?.message })
     return NextResponse.json({ error: e?.message || "Internal Server Error" }, { status: 500 })

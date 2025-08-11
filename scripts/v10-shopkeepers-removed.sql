@@ -1,8 +1,8 @@
--- Add soft-delete fields to shopkeepers and ensure defaults.
-ALTER TABLE public.shopkeepers
-ADD COLUMN IF NOT EXISTS removed BOOLEAN DEFAULT FALSE,
-ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ;
+-- Add soft-delete columns to shopkeepers table if missing
+alter table shopkeepers
+  add column if not exists removed boolean not null default false,
+  add column if not exists removed_at timestamptz null;
 
--- Optional helpful index
-CREATE INDEX IF NOT EXISTS idx_shopkeepers_campaign_active
-ON public.shopkeepers (campaign_id, removed);
+-- Optional index to speed campaign listing of active shopkeepers
+create index if not exists shopkeepers_campaign_active_idx
+  on shopkeepers (campaign_id, removed);

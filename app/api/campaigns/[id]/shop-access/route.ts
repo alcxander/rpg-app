@@ -11,11 +11,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   console.log("[api/campaigns.shop-access] start", { reqId, hasUser: !!userId, sessionId, campaignId })
 
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  if (!campaignId) return NextResponse.json({ error: "campaignId required" }, { status: 400 })
+  if (!campaignId) return NextResponse.json({ error: "campaign id required" }, { status: 400 })
 
   try {
-    const body = await req.json().catch(() => ({}))
-    const access_enabled: boolean | undefined = body?.access_enabled
+    const { access_enabled } = await req.json().catch(() => ({}) as { access_enabled?: boolean })
+
     if (typeof access_enabled !== "boolean") {
       return NextResponse.json({ error: "access_enabled boolean required" }, { status: 400 })
     }
@@ -27,14 +27,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       .select("id,name,owner_id,access_enabled")
       .eq("id", campaignId)
       .single()
-
     if (cErr || !campaign) {
-      console.warn("[api/campaigns.shop-access] campaign not found", { reqId, message: cErr?.message })
+      console.warn("[api/campaigns.shop-access] not found", { reqId, message: cErr?.message })
       return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
     }
 
     if (campaign.owner_id !== userId) {
-      console.warn("[api/campaigns.shop-access] forbidden (not owner)", { reqId, owner_id: campaign.owner_id })
+      console.warn("[api/campaigns.shop-access] forbidden (not owner)", { reqId })
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
@@ -47,7 +46,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     if (uErr || !updated) {
       console.error("[api/campaigns.shop-access] update error", { reqId, message: uErr?.message })
-      return NextResponse.json({ error: "Failed to update access" }, { status: 500 })
+      return NextResponse.json({ error: "Failed to update" }, { status: 500 })
     }
 
     console.log("[api/campaigns.shop-access] done", { reqId, access_enabled: updated.access_enabled })

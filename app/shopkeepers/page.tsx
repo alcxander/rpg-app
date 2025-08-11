@@ -155,13 +155,32 @@ export default function ShopkeepersPage() {
         credentials: "include",
         body: JSON.stringify({ campaignId: selectedCampaignId, count }),
       })
-      const { data, raw } = await parseJsonSafe(res)
-      console.log("[shopkeepers.page] generate: response", { ok: res.ok, status: res.status, len: raw.length })
+      const clone = res.clone()
+      let data: any = null
+      let raw = ""
+      try {
+        data = await clone.json()
+        raw = JSON.stringify(data)
+      } catch {
+        raw = await res.text().catch(() => "")
+      }
+      console.log("[shopkeepers.page] generate: response", { ok: res.ok, status: res.status, len: raw.length, data })
       if (!res.ok) throw new Error(raw || "Generation failed")
-      toast({ title: "Shopkeepers updated", className: "bg-green-600 text-white" })
+
+      const createdCount = Number(data?.createdCount ?? 0)
+      toast({
+        title:
+          createdCount > 0
+            ? `Created ${createdCount} shopkeeper${createdCount === 1 ? "" : "s"}`
+            : "No new shopkeepers created",
+        className: createdCount > 0 ? "bg-green-600 text-white" : "bg-gray-700 text-white",
+      })
+
       await loadShopkeepers(selectedCampaignId)
     } catch (e: any) {
-      showError("Generation error", String(e?.message || e))
+      const msg = String(e?.message || e)
+      console.error("[shopkeepers.page] generate error", { msg })
+      toast({ title: "Generation error", description: msg, className: "bg-red-600 text-white" })
     } finally {
       setGenerating(false)
       console.log("[shopkeepers.page] generate: end")

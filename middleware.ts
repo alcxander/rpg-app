@@ -12,28 +12,29 @@ const isPublicRoute = createRouteMatcher([
 export default clerkMiddleware(async (auth, req) => {
   const { pathname } = req.nextUrl
 
-  // Helpful debug to verify middleware is hit for every request (remove later if noisy)
+  // Debug to confirm middleware is hit for every request (remove later if noisy)
   console.log("[MW] hit", { pathname })
 
-  // Skip protection for public routes
+  // Always initialize Clerk request state (kept for parity with your working version)
+  auth()
+
+  // Public routes continue without protection.
   if (isPublicRoute(req)) {
     return NextResponse.next()
   }
 
-  // Protect everything else (includes /, /shopkeepers, and all /api/*)
-  // NOTE: In your Clerk version, protect() is on the auth object passed into the callback
+  // Protect everything else, including /api/campaigns and /shopkeepers.
   await auth.protect()
 
   return NextResponse.next()
 })
 
-// Ensure middleware runs for app pages and API routes; skip static files and Next internals
+// Match all app and API routes; skip Next internals and static assets.
 export const config = {
   matcher: [
-    // All routes except files with an extension and Next internals
-    "/((?!.*\\..*|_next).*)",
-    "/",
-    // Explicitly include API/TRPC
+    // All routes except: - files with an extension - _next (internals)
+    "/((?!.+\\.[\\w]+$|_next).*)",
+    // Always include API and TRPC explicitly
     "/(api|trpc)(.*)",
   ],
 }

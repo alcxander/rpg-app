@@ -1,5 +1,7 @@
 "use client"
 
+import type React from "react"
+import type { CampaignOption, Shopkeeper } from "@/types" // Declare the Shopkeeper variable here
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useUser, RedirectToSignIn } from "@clerk/nextjs"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -11,33 +13,17 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
 import { ToastAction } from "@/components/ui/toast"
-import { Plus, RefreshCw, ToggleRight, ShoppingCart, Loader2, Home, AlertTriangle } from "lucide-react"
-
-type CampaignOption = { id: string; name: string; access_enabled?: boolean; owner_id?: string }
-
-type InventoryItem = {
-  id: string
-  item_name: string
-  rarity: string
-  base_price: number
-  price_adjustment_percent: number
-  final_price: number
-  stock_quantity: number
-}
-
-type Shopkeeper = {
-  id: string
-  name: string
-  race: string
-  age: number
-  alignment: string
-  quote: string
-  description: string
-  shop_type: string
-  image_url: string | null
-  inventory: InventoryItem[]
-  created_at: string
-}
+import {
+  Plus,
+  RefreshCw,
+  ToggleRight,
+  ShoppingCart,
+  Loader2,
+  Home,
+  AlertTriangle,
+  Trash2,
+  Sparkles,
+} from "lucide-react"
 
 export default function ShopkeepersPage() {
   const router = useRouter()
@@ -48,13 +34,14 @@ export default function ShopkeepersPage() {
   const [campaigns, setCampaigns] = useState<CampaignOption[]>([])
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
 
-  const [shopkeepers, setShopkeepers] = useState<Shopkeeper[]>([])
+  const [shopkeepers, setShopkeepers] = useState<Shopkeeper[]>([]) // Corrected the useState syntax here
   const [campaignAccessEnabled, setCampaignAccessEnabled] = useState<boolean>(true)
   const [isOwner, setIsOwner] = useState<boolean>(false)
 
   const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
-  const [count, setCount] = useState(5)
+  const [seeding, setSeeding] = useState(false)
+  const [count, setCount] = useState(1)
   const [sessionId, setSessionId] = useState<string>("")
 
   const parseJsonSafe = async (res: Response) => {
@@ -89,6 +76,21 @@ export default function ShopkeepersPage() {
         </ToastAction>
       ),
     })
+  }
+
+  // Deterministic tiny color blob per shopkeeper
+  function hueFromId(id: string) {
+    let h = 0
+    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360
+    return h
+  }
+  function blobStyleFor(id: string) {
+    const h = hueFromId(id)
+    const c1 = `hsla(${h}, 85%, 65%, 0.15)`
+    const c2 = `hsla(${h}, 85%, 65%, 0.08)`
+    return {
+      background: `radial-gradient(circle at 80% 20%, ${c1} 0%, ${c2} 55%, transparent 70%)`,
+    } as React.CSSProperties
   }
 
   // Load campaigns
@@ -141,7 +143,7 @@ export default function ShopkeepersPage() {
     if (selectedCampaignId) loadShopkeepers(selectedCampaignId)
   }, [selectedCampaignId]) // eslint-disable-line
 
-  // Generate
+  // Generate (now allows 1–20 and tops up only the delta)
   const onGenerate = async () => {
     if (!selectedCampaignId) return
     console.log("[shopkeepers.page] generate: start", { campaignId: selectedCampaignId, count })
@@ -156,13 +158,37 @@ export default function ShopkeepersPage() {
       const { data, raw } = await parseJsonSafe(res)
       console.log("[shopkeepers.page] generate: response", { ok: res.ok, status: res.status, len: raw.length })
       if (!res.ok) throw new Error(raw || "Generation failed")
-      toast({ title: "Shopkeepers created", className: "bg-green-600 text-white" })
+      toast({ title: "Shopkeepers updated", className: "bg-green-600 text-white" })
       await loadShopkeepers(selectedCampaignId)
     } catch (e: any) {
       showError("Generation error", String(e?.message || e))
     } finally {
       setGenerating(false)
       console.log("[shopkeepers.page] generate: end")
+    }
+  }
+
+  // Quick seed 5 when you have zero
+  const onQuickSeed = async () => {
+    if (!selectedCampaignId) return
+    setSeeding(true)
+    console.log("[shopkeepers.page] quick-seed: start", { campaignId: selectedCampaignId })
+    try {
+      const res = await fetch("/api/shopkeepers/quick-seed", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaignId: selectedCampaignId }),
+      })
+      const { data, raw } = await parseJsonSafe(res)
+      console.log("[shopkeepers.page] quick-seed: response", { ok: res.ok, status: res.status, len: raw.length })
+      if (!res.ok) throw new Error(raw || "Seed failed")
+      toast({ title: "Added 5 shopkeepers", className: "bg-green-600 text-white" })
+      await loadShopkeepers(selectedCampaignId)
+    } catch (e: any) {
+      showError("Seed error", String(e?.message || e))
+    } finally {
+      setSeeding(false)
     }
   }
 
@@ -193,6 +219,25 @@ export default function ShopkeepersPage() {
     }
   }
 
+  // Remove a shopkeeper (soft delete)
+  const onRemove = async (shopkeeperId: string) => {
+    if (!selectedCampaignId) return
+    if (!confirm("Remove this shopkeeper from the campaign?")) return
+    try {
+      const res = await fetch(`/api/shopkeepers/${encodeURIComponent(shopkeeperId)}`, {
+        method: "DELETE",
+        credentials: "include",
+      })
+      const { data, raw } = await parseJsonSafe(res)
+      console.log("[shopkeepers.page] remove: response", { ok: res.ok, status: res.status, len: raw.length })
+      if (!res.ok) throw new Error(raw || "Failed to remove")
+      toast({ title: "Shopkeeper removed", className: "bg-green-600 text-white" })
+      await loadShopkeepers(selectedCampaignId)
+    } catch (e: any) {
+      showError("Remove error", String(e?.message || e))
+    }
+  }
+
   // Auto-generate (server enforces permissions)
   const autoGenTriggered = useRef(false)
   const shouldAutoGenerate = useMemo(() => {
@@ -205,7 +250,7 @@ export default function ShopkeepersPage() {
     if (!shouldAutoGenerate) return
     if (autoGenTriggered.current) return
     const c = Number(search.get("count") || "")
-    if (Number.isFinite(c) && c >= 5 && c <= 20) setCount(c)
+    if (Number.isFinite(c) && c >= 1 && c <= 20) setCount(c)
     autoGenTriggered.current = true
     console.log("[shopkeepers.page] auto-generate: trigger", { campaignId: selectedCampaignId, count: c || count })
     onGenerate()
@@ -224,6 +269,7 @@ export default function ShopkeepersPage() {
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       <div className="mx-auto max-w-7xl px-4 py-6">
+        {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold text-purple-400">Shopkeepers</h1>
           <div className="flex gap-2">
@@ -266,12 +312,13 @@ export default function ShopkeepersPage() {
           </div>
         </div>
 
+        {/* Generation status */}
         {generating && (
           <div className="mb-4 p-3 rounded border border-yellow-600/40 bg-yellow-500/10 text-yellow-200 flex items-center gap-3">
             <Loader2 className="w-4 h-4 animate-spin" />
             <div>
               <div className="font-medium">Generating shopkeepers...</div>
-              <div className="text-xs opacity-80">Creating {count} shopkeepers. This may take a few seconds.</div>
+              <div className="text-xs opacity-80">Creating up to {count} total active shopkeepers.</div>
             </div>
           </div>
         )}
@@ -283,7 +330,9 @@ export default function ShopkeepersPage() {
             <TabsTrigger value="players">Players</TabsTrigger>
           </TabsList>
 
+          {/* Market Tab */}
           <TabsContent value="market" className="mt-4">
+            {/* Show DM controls at top; hidden for non-owners */}
             {isOwner && (
               <Card className="bg-gray-800 border-gray-700 mb-4">
                 <CardContent className="py-4 flex flex-wrap items-center gap-3">
@@ -291,10 +340,10 @@ export default function ShopkeepersPage() {
                     <Label className="text-gray-300">Generate count</Label>
                     <Input
                       type="number"
-                      min={5}
+                      min={1}
                       max={20}
                       value={count}
-                      onChange={(e) => setCount(Number.parseInt(e.target.value || "5", 10))}
+                      onChange={(e) => setCount(Math.max(1, Math.min(20, Number.parseInt(e.target.value || "1", 10))))}
                       className="w-24 bg-gray-900 border-gray-700 text-white"
                     />
                   </div>
@@ -329,25 +378,59 @@ export default function ShopkeepersPage() {
                   <AlertTriangle className="w-4 h-4 text-yellow-300" />
                   <p>No shopkeepers yet.</p>
                 </div>
+                {isOwner && (
+                  <Button
+                    onClick={onQuickSeed}
+                    disabled={seeding || !selectedCampaignId}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                    title="Quickly add 5 random shopkeepers to get started"
+                  >
+                    {seeding ? (
+                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    ) : (
+                      <Sparkles className="w-4 h-4 mr-2" />
+                    )}
+                    Quick add 5 shopkeepers
+                  </Button>
+                )}
               </div>
             ) : (
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {shopkeepers.map((sk) => (
-                  <Card key={sk.id} className="bg-gray-800 border-gray-700">
+                  <Card key={sk.id} className="bg-gray-800 border-gray-700 relative overflow-hidden">
+                    {/* Soft diffused color blob */}
+                    <div
+                      className="pointer-events-none absolute -top-8 -right-8 w-40 h-40 rounded-full blur-2xl"
+                      style={blobStyleFor(sk.id)}
+                      aria-hidden="true"
+                    />
                     <CardHeader>
                       <CardTitle className="flex items-center justify-between">
-                        <span>
+                        <span className="flex items-center gap-2">
                           {sk.name} <span className="text-xs text-gray-400">({sk.shop_type})</span>
                         </span>
-                        {sk.image_url ? (
-                          <img
-                            src={sk.image_url || "/placeholder.svg?height=48&width=48&query=shopkeeper%20token"}
-                            alt={`${sk.name} token`}
-                            className="w-12 h-12 rounded-full object-cover border border-gray-600"
-                          />
-                        ) : (
-                          <div className="w-12 h-12 rounded-full bg-gray-700 border border-gray-600" />
-                        )}
+                        <div className="flex items-center gap-2">
+                          {isOwner && (
+                            <Button
+                              size="icon"
+                              variant="secondary"
+                              className="bg-gray-900 border border-gray-700 text-red-200 hover:text-white"
+                              title="Remove shopkeeper"
+                              onClick={() => onRemove(sk.id)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
+                          {sk.image_url ? (
+                            <img
+                              src={sk.image_url || "/placeholder.svg?height=48&width=48&query=shopkeeper%20token"}
+                              alt={`${sk.name} token`}
+                              className="w-12 h-12 rounded-full object-cover border border-gray-600"
+                            />
+                          ) : (
+                            <div className="w-12 h-12 rounded-full bg-gray-700 border border-gray-600" />
+                          )}
+                        </div>
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-3">
@@ -381,6 +464,7 @@ export default function ShopkeepersPage() {
                                       onClick={() => {
                                         /* hook up PATCH when ready */
                                       }}
+                                      title="Remove one (DM)"
                                     >
                                       -1
                                     </Button>
@@ -391,6 +475,7 @@ export default function ShopkeepersPage() {
                                       onClick={() => {
                                         /* hook up PATCH when ready */
                                       }}
+                                      title="Add one (DM)"
                                     >
                                       +1
                                     </Button>
@@ -420,40 +505,63 @@ export default function ShopkeepersPage() {
             )}
           </TabsContent>
 
-          {/* Management and Players tabs omitted for brevity; unchanged in logic */}
+          {/* Management Tab */}
           <TabsContent value="management" className="mt-4">
             {isOwner ? (
-              <Card className="bg-gray-800 border-gray-700 mb-4">
-                <CardContent className="py-4 flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <Label className="text-gray-300">Generate count</Label>
-                    <Input
-                      type="number"
-                      min={5}
-                      max={20}
-                      value={count}
-                      onChange={(e) => setCount(Number.parseInt(e.target.value || "5", 10))}
-                      className="w-24 bg-gray-900 border-gray-700 text-white"
-                    />
-                  </div>
-                  <Button
-                    onClick={onGenerate}
-                    className="bg-purple-600 hover:bg-purple-700 text-white"
-                    disabled={generating || !selectedCampaignId}
-                  >
-                    {generating ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Plus className="w-4 h-4 mr-2" />}{" "}
-                    Generate Shopkeepers
-                  </Button>
-                  <Button
-                    onClick={toggleAccess}
-                    variant="secondary"
-                    className="bg-gray-900 border border-gray-700 text-white"
-                  >
-                    <ToggleRight className="w-4 h-4 mr-2" />
-                    {campaignAccessEnabled ? "Disable player access" : "Enable player access"}
-                  </Button>
-                </CardContent>
-              </Card>
+              <>
+                <Card className="bg-gray-800 border-gray-700 mb-4">
+                  <CardContent className="py-4 flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <Label className="text-gray-300">Generate count</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={count}
+                        onChange={(e) =>
+                          setCount(Math.max(1, Math.min(20, Number.parseInt(e.target.value || "1", 10))))
+                        }
+                        className="w-24 bg-gray-900 border-gray-700 text-white"
+                      />
+                    </div>
+                    <Button
+                      onClick={onGenerate}
+                      className="bg-purple-600 hover:bg-purple-700 text-white"
+                      disabled={generating || !selectedCampaignId}
+                    >
+                      {generating ? (
+                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                      ) : (
+                        <Plus className="w-4 h-4 mr-2" />
+                      )}{" "}
+                      Generate Shopkeepers
+                    </Button>
+                    <Button
+                      onClick={toggleAccess}
+                      variant="secondary"
+                      className="bg-gray-900 border border-gray-700 text-white"
+                    >
+                      <ToggleRight className="w-4 h-4 mr-2" />
+                      {campaignAccessEnabled ? "Disable player access" : "Enable player access"}
+                    </Button>
+                    {shopkeepers.length === 0 && (
+                      <Button
+                        onClick={onQuickSeed}
+                        disabled={seeding || !selectedCampaignId}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                        title="Quickly add 5 random shopkeepers to get started"
+                      >
+                        {seeding ? (
+                          <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                        ) : (
+                          <Sparkles className="w-4 h-4 mr-2" />
+                        )}
+                        Quick add 5 shopkeepers
+                      </Button>
+                    )}
+                  </CardContent>
+                </Card>
+              </>
             ) : (
               <p className="text-gray-400">Only the DM can access management.</p>
             )}

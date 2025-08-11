@@ -1,92 +1,75 @@
-import { NextResponse, type NextRequest } from "next/server"
-import { getAuth } from "@clerk/nextjs/server"
-import { createAdminClient } from "@/lib/supabaseAdmin"
-
-function rid() {
-  return Math.random().toString(36).slice(2, 8)
-}
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 /**
  * GET /api/campaigns
- * Returns campaigns the current user owns (owner_id). Verbose logs included.
+ * Returns campaigns owned by the current user.
  */
 export async function GET(req: NextRequest) {
-  const reqId = rid()
-  const { userId, sessionId } = getAuth(req)
-  const cookieLen = req.headers.get("cookie")?.length || 0
-
-  console.log("[api/campaigns] GET start", { reqId, hasUser: !!userId, sessionId, cookieLen })
-  if (!userId) {
-    console.warn("[api/campaigns] unauthorized", { reqId })
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
-  const supabase = createAdminClient()
-
+  const reqId = Math.random().toString(36).slice(2, 8);
   try {
-    // Owned campaigns (owner is the DM)
-    const { data: owned, error: ownedErr } = await supabase
+    const { userId, sessionId } = auth();
+    console.log("[api/campaigns] GET start", { reqId, hasUser: !!userId, sessionId });
+
+    if (!userId) {
+      console.warn("[api/campaigns] GET unauthorized", { reqId });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { data, error } = await supabaseAdmin
       .from("campaigns")
-      .select("id,name,owner_id,access_enabled,created_at")
+      .select("id,name,owner_id,access_enabled,created_at,updated_at")
       .eq("owner_id", userId)
-      .order("created_at", { ascending: false })
-    console.log("[api/campaigns] owned result", {
-      reqId,
-      count: owned?.length ?? 0,
-      error: ownedErr?.message || null,
-    })
+      .order("created_at", { ascending: false });
 
-    // If you’d like to support member campaigns, add a safe attempt here.
-    // We’ll skip for now to avoid schema mismatches and keep it stable.
-    const campaigns = owned || []
+    if (error) {
+      console.error("[api/campaigns] GET query error", { reqId, error: error.message });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    }
 
-    console.log("[api/campaigns] GET done", { reqId, total: campaigns.length })
-    return NextResponse.json({ campaigns })
+    console.log("[api/campaigns] GET done", { reqId, count: data?.length ?? 0 });
+    return NextResponse.json({ campaigns: data ?? [] }, { status: 200 });
   } catch (e: any) {
-    console.error("[api/campaigns] GET exception", { reqId, message: e?.message })
-    return NextResponse.json({ error: e?.message || "Internal Server Error" }, { status: 500 })
+    console.error("[api/campaigns] GET exception", e?.message || e);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
 /**
  * POST /api/campaigns
- * Creates a new campaign owned by the current user.
- * Body: { name: string }
+ * Creates a campaign with the current user as owner.
+ * Body: { name?: string }
  */
 export async function POST(req: NextRequest) {
-  const reqId = rid()
-  const { userId, sessionId } = getAuth(req)
-  console.log("[api/campaigns] POST start", { reqId, hasUser: !!userId, sessionId })
-  if (!userId) {
-    console.warn("[api/campaigns] unauthorized", { reqId })
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
+  const reqId = Math.random().toString(36).slice(2, 8);
   try {
-    const bodyText = await req.text()
-    const body = bodyText ? JSON.parse(bodyText) : {}
-    const name: string | undefined = body?.name
-    console.log("[api/campaigns] POST body", { reqId, hasName: !!name })
-    if (!name || typeof name !== "string") {
-      return NextResponse.json({ error: "name required" }, { status: 400 })
+    const { userId, sessionId } = auth();
+    console.log("[api/campaigns] POST start", { reqId, hasUser: !!userId, sessionId });
+
+    if (!userId) {
+      console.warn("[api/campaigns] POST unauthorized", { reqId });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const supabase = createAdminClient()
-    const { data, error } = await supabase
+    const body = await req.json().catch(() => ({} as any));
+    const name = (body?.name as string) || "New Campaign";
+
+    const { data, error } = await supabaseAdmin
       .from("campaigns")
       .insert({ name, owner_id: userId, access_enabled: true })
-      .select("id,name,owner_id,access_enabled,created_at")
-      .single()
-    console.log("[api/campaigns] POST insert", { reqId, campaignId: data?.id || null, error: error?.message || null })
+      .select("id,name,owner_id,access_enabled,created_at,updated_at")
+      .single();
 
-    if (error || !data) {
-      return NextResponse.json({ error: error?.message || "Insert failed" }, { status: 500 })
+    if (error) {
+      console.error("[api/campaigns] POST insert error", { reqId, error: error.message });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
-    console.log("[api/campaigns] POST done", { reqId })
-    return NextResponse.json({ campaign: data }, { status: 201 })
+    console.log("[api/campaigns] POST done", { reqId, id: data?.id });
+    return NextResponse.json({ campaign: data }, { status: 201 });
   } catch (e: any) {
-    console.error("[api/campaigns] POST exception", { reqId, message: e?.message })
-    return NextResponse.json({ error: e?.message || "Internal Server Error" }, { status: 500 })
+    console.error("[api/campaigns] POST exception", e?.message || e);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

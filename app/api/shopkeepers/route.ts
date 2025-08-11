@@ -2,97 +2,98 @@ import { NextResponse, type NextRequest } from "next/server"
 import { getAuth } from "@clerk/nextjs/server"
 import { createAdminClient } from "@/lib/supabaseAdmin"
 
-const rid = () => Math.random().toString(36).slice(2, 8)
+function rid() {
+  return Math.random().toString(36).slice(2, 8)
+}
 
-// GET /api/shopkeepers?campaignId=...
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url)
-  const campaignId = searchParams.get("campaignId") || ""
-  const { userId, sessionId } = getAuth(req)
   const reqId = rid()
-  console.log("[api/shopkeepers] GET start", { reqId, userId: !!userId, sessionId, campaignId })
-
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  if (!campaignId) return NextResponse.json({ error: "campaignId required" }, { status: 400 })
-
+  const url = new URL(req.url)
+  const campaignId = url.searchParams.get("campaignId") || ""
   try {
+    const { userId, sessionId } = getAuth(req)
+    console.log("[api/shopkeepers] GET start", {
+      reqId,
+      userId: !!userId,
+      sessionId,
+      campaignId,
+    })
+    if (!campaignId) return NextResponse.json({ error: "campaignId required" }, { status: 400 })
+
     const supabase = createAdminClient()
 
-    // campaign access: owner controls access; players can view if enabled
-    const { data: campaign, error: cErr } = await supabase
+    // Fetch campaign and verify access
+    const { data: camp, error: campErr } = await supabase
       .from("campaigns")
-      .select("id,name,owner_id,access_enabled")
+      .select("id,owner_id,access_enabled")
       .eq("id", campaignId)
       .single()
-    console.log("[api/shopkeepers] campaign", {
-      reqId,
-      cErr: cErr?.message,
-      owner_id: campaign?.owner_id,
-      access_enabled: campaign?.access_enabled,
-    })
-    if (!campaign || cErr) return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
+    if (campErr || !camp) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
-    const isOwner = campaign.owner_id === userId
-    if (!isOwner && !campaign.access_enabled) {
-      console.warn("[api/shopkeepers] access disabled for non-owner", { reqId })
-      // Return empty list with campaign meta so UI can render state instead of erroring
-      return NextResponse.json({ campaign: { ...campaign, isOwner }, shopkeepers: [] })
+    const isOwner = userId && camp.owner_id === userId
+    if (!isOwner && !camp.access_enabled) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
-    // Fetch active (not removed) shopkeepers
-    const { data: shops, error: sErr } = await supabase
+    // Get active shopkeepers (removed=false or null)
+    const { data: shops, error: shopsErr } = await supabase
       .from("shopkeepers")
-      .select("id,name,race,age,alignment,quote,description,shop_type,token_id,created_at")
+      .select("id,name,race,age,alignment,quote,description,shop_type,image_url,created_at")
       .eq("campaign_id", campaignId)
-      .eq("removed", false)
+      .or("removed.is.null,removed.eq.false")
       .order("created_at", { ascending: false })
-    console.log("[api/shopkeepers] shops", { reqId, count: shops?.length ?? 0, sErr: sErr?.message })
 
-    const tokenIds = (shops || []).map((s) => s.token_id).filter(Boolean) as string[]
-    let tokenMap = new Map<string, string>()
-    if (tokenIds.length) {
-      const { data: tokens, error: tErr } = await supabase
-        .from("tokens")
-        .select("id,image_url")
-        .in("id", tokenIds as string[])
-      console.log("[api/shopkeepers] tokens", { reqId, count: tokens?.length ?? 0, tErr: tErr?.message })
-      if (!tErr && tokens) tokenMap = new Map(tokens.map((t) => [String(t.id), String(t.image_url)]))
+    if (shopsErr) {
+      console.error("[api/shopkeepers] shops error", { reqId, error: shopsErr.message })
+      return NextResponse.json({ error: shopsErr.message }, { status: 500 })
     }
 
-    const shopIds = (shops || []).map((s) => s.id)
-    const invByShop = new Map<string, any[]>()
-    if (shopIds.length) {
-      const { data: invRows, error: iErr } = await supabase
-        .from("shop_inventory")
-        .select(
-          "id,shopkeeper_id,item_name,rarity,base_price,price_adjustment_percent,final_price,stock_quantity,created_at",
-        )
-        .in("shopkeeper_id", shopIds as string[])
-      console.log("[api/shopkeepers] inventory", { reqId, count: invRows?.length ?? 0, iErr: iErr?.message })
-      if (!iErr && invRows) {
-        for (const r of invRows) {
-          const arr = invByShop.get(r.shopkeeper_id) || []
-          arr.push(r)
-          invByShop.set(r.shopkeeper_id, arr)
-        }
+    const ids = (shops ?? []).map((s) => s.id)
+    let inventoryByShop: Record<string, any[]> = {}
+    if (ids.length > 0) {
+      const { data: items, error: itemsErr } = await supabase
+        .from("shopkeeper_inventory")
+        .select("id,shopkeeper_id,item_name,rarity,base_price,price_adjustment_percent,final_price,stock_quantity")
+        .in("shopkeeper_id", ids)
+
+      if (itemsErr) {
+        console.error("[api/shopkeepers] inventory error", { reqId, error: itemsErr.message })
+        return NextResponse.json({ error: itemsErr.message }, { status: 500 })
       }
+      inventoryByShop = (items ?? []).reduce((acc: Record<string, any[]>, it: any) => {
+        const sid = it.shopkeeper_id
+        if (!acc[sid]) acc[sid] = []
+        acc[sid].push({
+          id: it.id,
+          item_name: it.item_name,
+          rarity: it.rarity,
+          base_price: it.base_price,
+          price_adjustment_percent: it.price_adjustment_percent,
+          final_price: it.final_price,
+          stock_quantity: it.stock_quantity,
+        })
+        return acc
+      }, {})
     }
 
-    const result = (shops || []).map((s) => ({
+    const result = (shops ?? []).map((s) => ({
       ...s,
-      image_url: s.token_id ? tokenMap.get(String(s.token_id)) || null : null,
-      inventory: invByShop.get(s.id) || [],
+      inventory: inventoryByShop[s.id] ?? [],
     }))
 
-    console.log("[api/shopkeepers] done", {
+    console.log("[api/shopkeepers] GET done", {
       reqId,
-      shops: result.length,
+      campaignId,
+      count: result.length,
       isOwner,
-      access_enabled: campaign.access_enabled,
+      access: camp.access_enabled,
     })
-    return NextResponse.json({ campaign: { ...campaign, isOwner }, shopkeepers: result })
+    return NextResponse.json({
+      campaign: { id: campaignId, isOwner, access_enabled: camp.access_enabled },
+      shopkeepers: result,
+    })
   } catch (e: any) {
     console.error("[api/shopkeepers] exception", { reqId, message: e?.message })
-    return NextResponse.json({ error: e?.message || "Internal Server Error" }, { status: 500 })
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

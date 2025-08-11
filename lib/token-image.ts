@@ -1,50 +1,43 @@
 /**
- * Token image generation via Stability API (multipart/form-data).
- * Returns a data URL (image/png) on success, or null on failure.
+ * Stability image generation via multipart/form-data.
+ * Returns a data URL (image/png) or null on failure.
  */
-export async function generateTokenImage(prompt: string): Promise<string | null> {
-  const apiKey = process.env.STABILITY_API_KEY
-  const reqId = Math.random().toString(36).slice(2, 8)
-  if (!apiKey) {
-    console.warn("[token-image] Missing STABILITY_API_KEY", { reqId })
-    return null
+export async function generateShopkeeperImage(prompt: string): Promise<{
+  imageUrl: string | null
+  provider: "stability" | "fallback"
+  prompt: string
+}> {
+  const key = process.env.STABILITY_API_KEY
+  if (!key) {
+    return { imageUrl: null, provider: "fallback", prompt }
   }
 
   try {
     const form = new FormData()
-    form.append("prompt", prompt)
-    form.append("output_format", "png")
-    form.append("mode", "text-to-image")
-    // Keep costs down and keep it fast
-    form.append("width", "256")
-    form.append("height", "256")
-    form.append("cfg_scale", "3")
-    form.append("steps", "14")
+    form.set("prompt", prompt)
+    form.set("output_format", "png")
 
-    const resp = await fetch("https://api.stability.ai/v2beta/stable-image/generate/core", {
+    const res = await fetch("https://api.stability.ai/v2beta/stable-image/generate/core", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${key}`,
         Accept: "image/*",
       },
       body: form,
     })
 
-    if (!resp.ok) {
-      let errBody = ""
-      try {
-        errBody = await resp.text()
-      } catch {}
-      console.error("[token-image] stability error", { reqId, status: resp.status, body: errBody })
-      return null
+    if (!res.ok) {
+      const body = await res.text().catch(() => "")
+      console.warn("[token-image] stability error", { status: res.status, body })
+      return { imageUrl: null, provider: "fallback", prompt }
     }
 
-    const buf = await resp.arrayBuffer()
-    const base64 = Buffer.from(buf).toString("base64")
+    const buf = await res.arrayBuffer()
+    const base64 = Buffer.from(new Uint8Array(buf)).toString("base64")
     const dataUrl = `data:image/png;base64,${base64}`
-    return dataUrl
+    return { imageUrl: dataUrl, provider: "stability", prompt }
   } catch (e: any) {
-    console.error("[token-image] exception", { reqId, message: e?.message })
-    return null
+    console.warn("[token-image] exception", { message: e?.message })
+    return { imageUrl: null, provider: "fallback", prompt }
   }
 }

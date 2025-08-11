@@ -184,7 +184,7 @@ export default function HomePage() {
   )
 
   const fetchCampaigns = useCallback(async () => {
-    const res = await fetch("/api/campaigns", { method: "GET" })
+    const res = await fetch("/api/campaigns", { method: "GET", credentials: "include" })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
       toast({
@@ -359,6 +359,7 @@ export default function HomePage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
+      credentials: "include",
     })
     const data = await res.json().catch(() => ({}))
     if (res.ok) {

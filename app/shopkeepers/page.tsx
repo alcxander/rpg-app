@@ -275,6 +275,32 @@ export default function ShopkeepersPage() {
     onGenerate()
   }, [selectedCampaignId, shouldAutoGenerate]) // eslint-disable-line
 
+  const updateInventory = async (inventoryId: string, action: "increment" | "decrement") => {
+    try {
+      const response = await fetch(`/api/shopkeepers/inventory/${inventoryId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ action }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        showError("Inventory update failed", JSON.stringify(errorData))
+        return
+      }
+
+      const data = await response.json()
+      console.log("[shopkeepers.page] inventory updated", { inventoryId, action, data })
+
+      // Refresh the shopkeepers list to show updated quantities
+      await loadShopkeepers(selectedCampaignId)
+    } catch (error) {
+      console.error("[shopkeepers.page] inventory update error", error)
+      showError("Inventory update failed", "Network error")
+    }
+  }
+
   if (!isLoaded) {
     return (
       <div className="h-screen bg-gray-900 text-white flex items-center justify-center">
@@ -481,7 +507,7 @@ export default function ShopkeepersPage() {
                                       variant="secondary"
                                       className="bg-gray-700 text-white"
                                       onClick={() => {
-                                        /* hook up PATCH when ready */
+                                        updateInventory(it.id, "decrement")
                                       }}
                                       title="Remove one (DM)"
                                     >
@@ -492,7 +518,7 @@ export default function ShopkeepersPage() {
                                       variant="secondary"
                                       className="bg-gray-700 text-white"
                                       onClick={() => {
-                                        /* hook up PATCH when ready */
+                                        updateInventory(it.id, "increment")
                                       }}
                                       title="Add one (DM)"
                                     >

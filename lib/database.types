@@ -134,6 +134,7 @@ export type Database = {
           rarity: string
           shopkeeper_id: string
           stock_quantity: number
+          quantity: number
         }
         Insert: {
           base_price: number
@@ -145,6 +146,7 @@ export type Database = {
           rarity: string
           shopkeeper_id: string
           stock_quantity: number
+          quantity?: number
         }
         Update: {
           base_price?: number
@@ -156,6 +158,7 @@ export type Database = {
           rarity?: string
           shopkeeper_id?: string
           stock_quantity?: number
+          quantity?: number
         }
         Relationships: [
           {

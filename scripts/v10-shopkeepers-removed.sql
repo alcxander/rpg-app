@@ -1,8 +1,19 @@
--- Add soft-delete columns to shopkeepers table if missing
-alter table shopkeepers
-  add column if not exists removed boolean not null default false,
-  add column if not exists removed_at timestamptz null;
+-- Adds soft-delete fields if they don't exist.
+do $$
+begin
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_name = 'shopkeepers' and column_name = 'removed'
+  ) then
+    alter table public.shopkeepers add column removed boolean default false;
+  end if;
 
--- Optional index to speed campaign listing of active shopkeepers
-create index if not exists shopkeepers_campaign_active_idx
-  on shopkeepers (campaign_id, removed);
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_name = 'shopkeepers' and column_name = 'removed_at'
+  ) then
+    alter table public.shopkeepers add column removed_at timestamptz null;
+  end if;
+end $$;

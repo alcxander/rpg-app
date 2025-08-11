@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     const raw = await req.text()
     const body = raw ? JSON.parse(raw) : {}
     const campaignId: string | undefined = body?.campaignId
-    const requestedCount: number = Number(body?.count ?? 5)
+    const requestedCount: number = Number(body?.count ?? 1)
     console.log("[api/shopkeepers.generate] body", { reqId, campaignId, requestedCount })
 
     if (!campaignId) return NextResponse.json({ error: "campaignId required" }, { status: 400 })
@@ -46,45 +46,34 @@ export async function POST(req: NextRequest) {
     if (cErr || !campaign) return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
     if (campaign.owner_id !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
-    const safeRequested = Math.max(5, Math.min(20, Number.isFinite(requestedCount) ? requestedCount : 5))
+    const safeRequested = Math.max(1, Math.min(20, Number.isFinite(requestedCount) ? requestedCount : 1))
 
     // Count existing active shopkeepers
-    const { data: existing, error: eErr } = await supabase
+    const { count: activeCount, error: countErr } = await supabase
       .from("shopkeepers")
       .select("id", { count: "exact", head: true })
       .eq("campaign_id", campaignId)
       .eq("removed", false)
 
-    if (eErr) {
-      console.error("[api/shopkeepers.generate] existing count error", { reqId, message: eErr.message })
-    }
-    const existingCount = (existing as unknown as any)?.length ? (existing as any).length : eErr ? 0 : (existing as any)
-    // Note: Supabase count with head:true puts count on response; Next.js returns undefined here,
-    // so we can safely fetch a second query if count is undefined.
-    let activeCount = Number.isFinite(existingCount) ? Number(existingCount) : 0
-    if (!Number.isFinite(activeCount)) {
-      const { data: rows, error: rcErr } = await supabase
-        .from("shopkeepers")
-        .select("id")
-        .eq("campaign_id", campaignId)
-        .eq("removed", false)
-      if (!rcErr) activeCount = (rows || []).length
-    }
+    console.log("[api/shopkeepers.generate] top-up pre", {
+      reqId,
+      activeCount: activeCount ?? 0,
+      requested: safeRequested,
+      countErr: countErr?.message || null,
+    })
 
-    const missing = Math.max(0, safeRequested - activeCount)
-    console.log("[api/shopkeepers.generate] top-up", { reqId, activeCount, requested: safeRequested, missing })
-
+    const missing = Math.max(0, safeRequested - (activeCount ?? 0))
     if (missing <= 0) {
       return NextResponse.json({
         ok: true,
         created: [],
         message: "Already have enough active shopkeepers",
-        activeCount,
+        activeCount: activeCount ?? 0,
         requested: safeRequested,
-        promptUsed: null,
       })
     }
 
+    console.log("[api/shopkeepers.generate] generating", { reqId, missing })
     const generated = generateShopkeepers(missing)
     const created: any[] = []
     let idx = 0
@@ -105,9 +94,7 @@ export async function POST(req: NextRequest) {
       } catch (err: any) {
         console.error("[api/shopkeepers.generate] image generation error", { reqId, idx, message: err?.message })
       }
-      if (!imageUrl) {
-        imageUrl = pick(ENEMY_FALLBACKS)
-      }
+      if (!imageUrl) imageUrl = pick(ENEMY_FALLBACKS)
       console.log("[api/shopkeepers.generate] token image", {
         reqId,
         idx,
@@ -178,13 +165,13 @@ export async function POST(req: NextRequest) {
       reqId,
       created: created.length,
       requested: safeRequested,
-      activeBefore: activeCount,
+      activeBefore: activeCount ?? 0,
     })
     return NextResponse.json({
       ok: true,
       created,
       requested: safeRequested,
-      activeBefore: activeCount,
+      activeBefore: activeCount ?? 0,
     })
   } catch (e: any) {
     console.error("[api/shopkeepers.generate] exception", { reqId, message: e?.message })

@@ -1,49 +1,50 @@
 /**
- * Token image generation via Stability API.
+ * Token image generation via Stability API (multipart/form-data).
  * Returns a data URL (image/png) on success, or null on failure.
  */
 export async function generateTokenImage(prompt: string): Promise<string | null> {
   const apiKey = process.env.STABILITY_API_KEY
+  const reqId = Math.random().toString(36).slice(2, 8)
   if (!apiKey) {
-    console.warn("[token-image] Missing STABILITY_API_KEY")
+    console.warn("[token-image] Missing STABILITY_API_KEY", { reqId })
     return null
   }
 
   try {
+    const form = new FormData()
+    form.append("prompt", prompt)
+    form.append("output_format", "png")
+    form.append("mode", "text-to-image")
+    // Keep costs down and keep it fast
+    form.append("width", "256")
+    form.append("height", "256")
+    form.append("cfg_scale", "3")
+    form.append("steps", "14")
+
     const resp = await fetch("https://api.stability.ai/v2beta/stable-image/generate/core", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
         Accept: "image/*",
       },
-      body: JSON.stringify({
-        prompt,
-        output_format: "png",
-        aspect_ratio: "1:1",
-        mode: "text-to-image",
-      }),
+      body: form,
     })
 
     if (!resp.ok) {
-      // Stability returns JSON error bodies when Accept is not image/*, but we set Accept image/*,
-      // so parse best-effort text.
-      let errText = ""
+      let errBody = ""
       try {
-        errText = await resp.text()
+        errBody = await resp.text()
       } catch {}
-      console.error("[token-image] stability error", { status: resp.status, body: errText.slice(0, 1000) })
+      console.error("[token-image] stability error", { reqId, status: resp.status, body: errBody })
       return null
     }
 
-    // Response is an image binary
-    const arrayBuf = await resp.arrayBuffer()
-    // Next.js Node runtime supports Buffer
-    const base64 = Buffer.from(arrayBuf).toString("base64")
+    const buf = await resp.arrayBuffer()
+    const base64 = Buffer.from(buf).toString("base64")
     const dataUrl = `data:image/png;base64,${base64}`
     return dataUrl
   } catch (e: any) {
-    console.error("[token-image] exception", { message: e?.message })
+    console.error("[token-image] exception", { reqId, message: e?.message })
     return null
   }
 }

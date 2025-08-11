@@ -1,12 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getAuth } from "path/to/getAuth" // Replace with actual import path
-import { createAdminClient } from "path/to/createAdminClient" // Replace with actual import path
+import { getAuth } from "@clerk/nextjs/server"
+import { createAdminClient } from "@/lib/supabaseAdmin"
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const reqId = Math.random().toString(36).substring(2, 8)
 
   try {
-    const { id } = params
+    const { id } = await params
     console.log("[api/shopkeepers/inventory] PATCH start", { reqId, inventoryId: id })
 
     const { userId } = getAuth(req)
@@ -53,14 +53,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
-    // Calculate new quantity
-    const currentQuantity = inventory.quantity || 0
+    const currentQuantity = inventory.stock_quantity || 0
     const newQuantity = action === "increment" ? currentQuantity + 1 : Math.max(0, currentQuantity - 1) // Don't go below 0
 
     // Update the inventory
     const { data: updatedInventory, error: updateError } = await supabase
       .from("shopkeeper_inventory")
-      .update({ quantity: newQuantity })
+      .update({ stock_quantity: newQuantity })
       .eq("id", id)
       .select()
       .single()

@@ -1,97 +1,176 @@
-import { NextResponse } from "next/server"
-import { createServerSupabaseClient } from "@/lib/supabaseAdmin"
-import type { SessionParticipant } from "@/lib/types"
-import { auth } from "@clerk/nextjs/server"
+import { type NextRequest, NextResponse } from "next/server"
+import { getAuth } from "@clerk/nextjs/server"
+import { createAdminClient } from "@/lib/supabaseAdmin"
 
 export const runtime = "nodejs"
 
-export async function POST(req: Request) {
-  const { userId: clerkUserId, getToken } = await auth()
-
-  if (!clerkUserId || !getToken) {
-    return NextResponse.json({ error: "Authentication required." }, { status: 401 })
-  }
+export async function POST(request: NextRequest) {
+  const reqId = Math.random().toString(36).substring(7)
 
   try {
-    const sessionToken = await getToken({ template: "supabase" })
-    if (!sessionToken) {
-      return NextResponse.json({ error: "Authentication token missing." }, { status: 401 })
+    console.log("[api/join-session] POST start", { reqId })
+
+    const { userId } = await getAuth(request)
+    if (!userId) {
+      console.log("[api/join-session] POST unauthorized", { reqId })
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
-    const supabase = createServerSupabaseClient(sessionToken)
-    const { sessionId } = await req.json()
+
+    const body = await request.json()
+    const { sessionId } = body
 
     if (!sessionId) {
-      return NextResponse.json({ error: "Session ID is required." }, { status: 400 })
+      console.log("[api/join-session] POST missing sessionId", { reqId })
+      return NextResponse.json({ error: "Session ID is required" }, { status: 400 })
     }
 
-    // Must join an existing session; do not auto-create
-    const sessionRes = await supabase
+    console.log("[api/join-session] POST processing", { reqId, sessionId, userId })
+
+    const supabase = createAdminClient()
+
+    // First, get the session and its campaign
+    const { data: session, error: sessionError } = await supabase
       .from("sessions")
-      .select("id, campaign_id, participants")
+      .select(`
+        *,
+        campaigns (*)
+      `)
       .eq("id", sessionId)
-      .maybeSingle()
+      .single()
 
-    if (sessionRes.error) {
-      return NextResponse.json({ error: sessionRes.error.message }, { status: 500 })
-    }
-    if (!sessionRes.data) {
-      return NextResponse.json({ error: `Session "${sessionId}" not found. Ask the DM to create it.` }, { status: 404 })
+    if (sessionError || !session) {
+      console.log("[api/join-session] POST session not found", { reqId, sessionId, error: sessionError })
+      return NextResponse.json({ error: "Session not found" }, { status: 404 })
     }
 
-    const session = sessionRes.data as { id: string; campaign_id: string; participants: any[] | null }
+    console.log("[api/join-session] POST session found", {
+      reqId,
+      sessionId,
+      campaignId: session.campaign_id,
+      campaignName: session.campaigns?.name,
+    })
 
-    // Fetch campaign to check owner and members
-    const campaignRes = await supabase
-      .from("campaigns")
-      .select("id, owner_id, settings")
-      .eq("id", session.campaign_id)
-      .maybeSingle()
+    // Check if user has access to this campaign
+    let hasAccess = false
+    let accessReason = ""
 
-    if (campaignRes.error || !campaignRes.data) {
-      return NextResponse.json({ error: "Campaign not found for this session." }, { status: 404 })
+    // Check if user is the campaign owner
+    if (session.campaigns?.owner_id === userId) {
+      hasAccess = true
+      accessReason = "campaign owner"
+    } else {
+      // Check if user is a member of the campaign
+      const { data: membership, error: memberError } = await supabase
+        .from("campaign_members")
+        .select("*")
+        .eq("campaign_id", session.campaign_id)
+        .eq("user_id", userId)
+        .single()
+
+      if (membership) {
+        hasAccess = true
+        accessReason = `campaign member (${membership.role})`
+      } else if (memberError) {
+        console.log("[api/join-session] POST membership check error", { reqId, error: memberError })
+      }
     }
 
-    const isOwner = campaignRes.data.owner_id === clerkUserId
-    const members: string[] = Array.isArray((campaignRes.data.settings as any)?.members)
-      ? (campaignRes.data.settings as any).members
-      : []
-
-    const alreadyParticipant = (session.participants || []).some((p: any) => p.userId === clerkUserId)
-    const allowedToJoin = isOwner || alreadyParticipant || members.includes(clerkUserId)
-
-    if (!allowedToJoin) {
+    if (!hasAccess) {
+      console.log("[api/join-session] POST access denied", {
+        reqId,
+        userId,
+        sessionId,
+        campaignId: session.campaign_id,
+        campaignOwnerId: session.campaigns?.owner_id,
+      })
       return NextResponse.json(
         {
-          error: "You are not a member of this campaign. Ask the DM to invite you before joining this session.",
+          error: "Access denied. You must be invited to this campaign to join its sessions.",
         },
         { status: 403 },
       )
     }
 
-    if (alreadyParticipant) {
-      return NextResponse.json({ message: "You are already in this session." })
+    console.log("[api/join-session] POST access granted", { reqId, accessReason })
+
+    // Add user to session participants if not already there
+    const currentParticipants = Array.isArray(session.participants) ? session.participants : []
+
+    if (!currentParticipants.includes(userId)) {
+      const updatedParticipants = [...currentParticipants, userId]
+
+      const { error: updateError } = await supabase
+        .from("sessions")
+        .update({
+          participants: updatedParticipants,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", sessionId)
+
+      if (updateError) {
+        console.error("[api/join-session] POST failed to update participants", { reqId, error: updateError })
+        return NextResponse.json({ error: "Failed to join session" }, { status: 500 })
+      }
+
+      console.log("[api/join-session] POST added to participants", {
+        reqId,
+        userId,
+        sessionId,
+        participantCount: updatedParticipants.length,
+      })
+    } else {
+      console.log("[api/join-session] POST already a participant", { reqId, userId, sessionId })
     }
 
-    // Add as Player
-    const newParticipants: SessionParticipant[] = [
-      ...(Array.isArray(session.participants) ? session.participants : []),
-      { userId: clerkUserId, role: isOwner ? "DM" : "Player" },
-    ]
+    // Initialize or get the map for this session
+    let { data: map, error: mapError } = await supabase.from("maps").select("*").eq("session_id", sessionId).single()
 
-    const upd = await supabase
-      .from("sessions")
-      .update({ participants: newParticipants })
-      .eq("id", sessionId)
-      .select("id, participants")
-      .single()
+    if (mapError && mapError.code === "PGRST116") {
+      // Map doesn't exist, create it
+      console.log("[api/join-session] POST creating new map", { reqId, sessionId })
+      const { data: newMap, error: createMapError } = await supabase
+        .from("maps")
+        .insert({
+          session_id: sessionId,
+          grid_size: 30,
+          tokens: [],
+          terrain_data: null,
+          background_image: null,
+        })
+        .select()
+        .single()
 
-    if (upd.error) {
-      return NextResponse.json({ error: upd.error.message }, { status: 500 })
+      if (createMapError) {
+        console.error("[api/join-session] POST failed to create map", { reqId, error: createMapError })
+        return NextResponse.json({ error: "Failed to initialize session map" }, { status: 500 })
+      }
+
+      map = newMap
+    } else if (mapError) {
+      console.error("[api/join-session] POST map query error", { reqId, error: mapError })
+      return NextResponse.json({ error: "Failed to load session map" }, { status: 500 })
     }
 
-    return NextResponse.json({ message: "Joined session successfully.", session: upd.data })
+    console.log("[api/join-session] POST success", {
+      reqId,
+      sessionId,
+      userId,
+      campaignId: session.campaign_id,
+      campaignName: session.campaigns?.name,
+      accessReason,
+      hasMap: !!map,
+    })
+
+    return NextResponse.json({
+      success: true,
+      session: {
+        ...session,
+        map,
+      },
+      message: `Successfully joined session in campaign "${session.campaigns?.name}"`,
+    })
   } catch (error: any) {
-    console.error("API: join-session: Caught error:", error)
-    return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 })
+    console.error("[api/join-session] POST error", { reqId, error: error.message, stack: error.stack })
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

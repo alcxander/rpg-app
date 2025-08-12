@@ -17,7 +17,7 @@ export default function CampaignSettingsPage({ params }: CampaignSettingsPagePro
   const [refreshTrigger, setRefreshTrigger] = useState(0)
 
   const handleInviteSuccess = () => {
-    // Trigger a refresh of the members list
+    // Trigger refresh of members list
     setRefreshTrigger((prev) => prev + 1)
   }
 
@@ -53,25 +53,24 @@ export default function CampaignSettingsPage({ params }: CampaignSettingsPagePro
           <Card>
             <CardHeader>
               <CardTitle>How to Find User IDs</CardTitle>
-              <CardDescription>Help your players find their user IDs to invite them</CardDescription>
+              <CardDescription>Help your players find their user ID to join your campaign</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <h4 className="font-medium">For Players:</h4>
-                <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-                  <li>Go to your profile settings</li>
-                  <li>Look for "User ID" or "Account ID"</li>
-                  <li>Copy the ID (usually starts with "user_")</li>
-                  <li>Share it with your Dungeon Master</li>
+                <ul className="text-sm text-muted-foreground space-y-1 ml-4">
+                  <li>• Check your profile page or account settings</li>
+                  <li>• Look for a string starting with "user_"</li>
+                  <li>• Ask the DM to check the Clerk dashboard</li>
                 </ul>
               </div>
 
               <div className="space-y-2">
-                <h4 className="font-medium">Alternative Methods:</h4>
-                <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-                  <li>Ask players to share their profile URL</li>
-                  <li>Use email addresses if supported</li>
-                  <li>Create a shared document for ID collection</li>
+                <h4 className="font-medium">For DMs:</h4>
+                <ul className="text-sm text-muted-foreground space-y-1 ml-4">
+                  <li>• Visit your Clerk dashboard</li>
+                  <li>• Go to the Users section</li>
+                  <li>• Find the player and copy their User ID</li>
                 </ul>
               </div>
             </CardContent>

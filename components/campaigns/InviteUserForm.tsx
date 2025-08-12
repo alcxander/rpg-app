@@ -54,26 +54,26 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
       if (data.already_member) {
         toast({
           title: "Already a member",
-          description: "This user is already a member of the campaign",
+          description: `User is already a ${data.member.role} in this campaign`,
           variant: "default",
         })
       } else {
         toast({
-          title: "Success!",
-          description: `User ${data.member?.user?.name || inviteeId} has been invited to the campaign`,
+          title: "Invitation sent!",
+          description: `User has been added to the campaign as a ${data.member.role}`,
           variant: "default",
         })
-
-        // Clear the form
-        setInviteeId("")
-
-        // Notify parent component
-        onInviteSuccess?.()
       }
+
+      // Clear form
+      setInviteeId("")
+
+      // Notify parent component
+      onInviteSuccess?.()
     } catch (error: any) {
       console.error("Invite error:", error)
       toast({
-        title: "Invite failed",
+        title: "Invitation failed",
         description: error.message || "Failed to invite user. Please try again.",
         variant: "destructive",
       })
@@ -102,10 +102,10 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
               value={inviteeId}
               onChange={(e) => setInviteeId(e.target.value)}
               disabled={isLoading}
-              className="w-full"
+              className="font-mono text-sm"
             />
-            <p className="text-sm text-muted-foreground">
-              You can find user IDs in the user management section or ask the player for their ID
+            <p className="text-xs text-muted-foreground">
+              You can find user IDs in your Clerk dashboard or ask users to share their ID
             </p>
           </div>
 
@@ -113,7 +113,7 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Inviting...
+                Sending invitation...
               </>
             ) : (
               <>

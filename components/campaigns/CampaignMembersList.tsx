@@ -7,17 +7,24 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Users, Crown, User, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
-interface CampaignMember {
+interface Member {
   id: string
   user_id: string
   role: "DM" | "Player"
-  joined_at: string | null
+  joined_at: string
+  added_by?: string
   users: {
     id: string
-    name: string | null
-    email: string | null
-    image_url: string | null
+    email: string
+    name?: string
+    image_url?: string
   }
+}
+
+interface Campaign {
+  id: string
+  name: string
+  created_by: string
 }
 
 interface CampaignMembersListProps {
@@ -26,7 +33,8 @@ interface CampaignMembersListProps {
 }
 
 export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMembersListProps) {
-  const [members, setMembers] = useState<CampaignMember[]>([])
+  const [members, setMembers] = useState<Member[]>([])
+  const [campaign, setCampaign] = useState<Campaign | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const { toast } = useToast()
 
@@ -40,9 +48,10 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
       }
 
       const data = await response.json()
-      setMembers(data)
+      setMembers(data.members || [])
+      setCampaign(data.campaign)
     } catch (error: any) {
-      console.error("Failed to fetch members:", error)
+      console.error("Fetch members error:", error)
       toast({
         title: "Error",
         description: "Failed to load campaign members",
@@ -57,7 +66,15 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
     fetchMembers()
   }, [campaignId, refreshTrigger])
 
-  const getInitials = (name: string | null, email: string | null) => {
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    })
+  }
+
+  const getInitials = (name?: string, email?: string) => {
     if (name) {
       return name
         .split(" ")
@@ -72,11 +89,6 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
     return "U"
   }
 
-  const formatJoinDate = (dateString: string | null) => {
-    if (!dateString) return "Campaign Owner"
-    return new Date(dateString).toLocaleDateString()
-  }
-
   if (isLoading) {
     return (
       <Card>
@@ -89,7 +101,6 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
         <CardContent>
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin" />
-            <span className="ml-2">Loading members...</span>
           </div>
         </CardContent>
       </Card>
@@ -104,57 +115,47 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
           Campaign Members
         </CardTitle>
         <CardDescription>
-          {members.length} member{members.length !== 1 ? "s" : ""} in this campaign
+          {campaign?.name && `Members of "${campaign.name}"`}
+          {members.length > 0 && ` • ${members.length} member${members.length !== 1 ? "s" : ""}`}
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="space-y-4">
-          {members.map((member) => (
-            <div key={member.id} className="flex items-center justify-between p-3 border rounded-lg">
-              <div className="flex items-center gap-3">
-                <Avatar className="h-10 w-10">
-                  <AvatarImage src={member.users.image_url || undefined} />
-                  <AvatarFallback>{getInitials(member.users.name, member.users.email)}</AvatarFallback>
-                </Avatar>
+        {members.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+            <p>No members found</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {members.map((member) => (
+              <div key={member.id} className="flex items-center justify-between p-3 rounded-lg border">
+                <div className="flex items-center gap-3">
+                  <Avatar className="h-10 w-10">
+                    <AvatarImage src={member.users.image_url || "/placeholder.svg"} />
+                    <AvatarFallback>{getInitials(member.users.name, member.users.email)}</AvatarFallback>
+                  </Avatar>
 
-                <div className="flex flex-col">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">
-                      {member.users.name || member.users.email || `User ${member.user_id.slice(-8)}`}
-                    </span>
-                    {member.role === "DM" && <Crown className="h-4 w-4 text-yellow-500" />}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium truncate">{member.users.name || member.users.email}</p>
+                      <Badge
+                        variant={member.role === "DM" ? "default" : "secondary"}
+                        className="flex items-center gap-1"
+                      >
+                        {member.role === "DM" ? <Crown className="h-3 w-3" /> : <User className="h-3 w-3" />}
+                        {member.role}
+                      </Badge>
+                    </div>
+
+                    <p className="text-sm text-muted-foreground truncate">{member.users.email}</p>
+
+                    <p className="text-xs text-muted-foreground">Joined {formatDate(member.joined_at)}</p>
                   </div>
-                  <span className="text-sm text-muted-foreground">{member.users.email}</span>
                 </div>
               </div>
-
-              <div className="flex items-center gap-2">
-                <Badge variant={member.role === "DM" ? "default" : "secondary"}>
-                  {member.role === "DM" ? (
-                    <>
-                      <Crown className="mr-1 h-3 w-3" />
-                      Dungeon Master
-                    </>
-                  ) : (
-                    <>
-                      <User className="mr-1 h-3 w-3" />
-                      Player
-                    </>
-                  )}
-                </Badge>
-                <span className="text-xs text-muted-foreground">{formatJoinDate(member.joined_at)}</span>
-              </div>
-            </div>
-          ))}
-
-          {members.length === 0 && (
-            <div className="text-center py-8 text-muted-foreground">
-              <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>No members found</p>
-              <p className="text-sm">Invite players to get started</p>
-            </div>
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   )

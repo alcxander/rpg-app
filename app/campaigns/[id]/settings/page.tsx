@@ -53,25 +53,22 @@ export default function CampaignSettingsPage({ params }: CampaignSettingsPagePro
           <Card>
             <CardHeader>
               <CardTitle>How to Find User IDs</CardTitle>
-              <CardDescription>Help your players find their user ID to join your campaign</CardDescription>
+              <CardDescription>Instructions for finding user IDs to invite players</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <h4 className="font-medium">For Players:</h4>
-                <ul className="text-sm text-muted-foreground space-y-1 ml-4">
-                  <li>• Check your profile page or account settings</li>
-                  <li>• Look for a string starting with "user_"</li>
-                  <li>• Ask the DM to check the Clerk dashboard</li>
-                </ul>
+              <div>
+                <h4 className="font-medium mb-2">For Clerk Authentication:</h4>
+                <ol className="list-decimal list-inside space-y-1 text-sm text-muted-foreground">
+                  <li>Go to your Clerk Dashboard</li>
+                  <li>Navigate to Users section</li>
+                  <li>Find the user you want to invite</li>
+                  <li>Copy their User ID (starts with "user_")</li>
+                </ol>
               </div>
 
-              <div className="space-y-2">
-                <h4 className="font-medium">For DMs:</h4>
-                <ul className="text-sm text-muted-foreground space-y-1 ml-4">
-                  <li>• Visit your Clerk dashboard</li>
-                  <li>• Go to the Users section</li>
-                  <li>• Find the player and copy their User ID</li>
-                </ul>
+              <div>
+                <h4 className="font-medium mb-2">User ID Format:</h4>
+                <code className="text-xs bg-muted px-2 py-1 rounded">user_2ABC123DEF456GHI789</code>
               </div>
             </CardContent>
           </Card>

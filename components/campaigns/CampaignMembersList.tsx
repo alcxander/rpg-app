@@ -7,24 +7,18 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Users, Crown, User, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
-interface Member {
+interface CampaignMember {
   id: string
   user_id: string
   role: "DM" | "Player"
   joined_at: string
   added_by?: string
-  users: {
+  user?: {
     id: string
-    email: string
     name?: string
-    image_url?: string
+    email?: string
+    avatar_url?: string
   }
-}
-
-interface Campaign {
-  id: string
-  name: string
-  created_by: string
 }
 
 interface CampaignMembersListProps {
@@ -33,8 +27,7 @@ interface CampaignMembersListProps {
 }
 
 export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMembersListProps) {
-  const [members, setMembers] = useState<Member[]>([])
-  const [campaign, setCampaign] = useState<Campaign | null>(null)
+  const [members, setMembers] = useState<CampaignMember[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const { toast } = useToast()
 
@@ -48,10 +41,9 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
       }
 
       const data = await response.json()
-      setMembers(data.members || [])
-      setCampaign(data.campaign)
-    } catch (error: any) {
-      console.error("Fetch members error:", error)
+      setMembers(data)
+    } catch (error) {
+      console.error("Error fetching members:", error)
       toast({
         title: "Error",
         description: "Failed to load campaign members",
@@ -66,27 +58,28 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
     fetchMembers()
   }, [campaignId, refreshTrigger])
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    })
+  const getRoleIcon = (role: string) => {
+    return role === "DM" ? <Crown className="h-4 w-4" /> : <User className="h-4 w-4" />
   }
 
-  const getInitials = (name?: string, email?: string) => {
-    if (name) {
-      return name
-        .split(" ")
-        .map((n) => n[0])
-        .join("")
-        .toUpperCase()
-        .slice(0, 2)
-    }
-    if (email) {
-      return email.slice(0, 2).toUpperCase()
-    }
-    return "U"
+  const getRoleBadgeVariant = (role: string) => {
+    return role === "DM" ? "default" : "secondary"
+  }
+
+  const getUserDisplayName = (member: CampaignMember) => {
+    if (member.user?.name) return member.user.name
+    if (member.user?.email) return member.user.email
+    return member.user_id
+  }
+
+  const getUserInitials = (member: CampaignMember) => {
+    const name = getUserDisplayName(member)
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2)
   }
 
   if (isLoading) {
@@ -115,47 +108,42 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
           Campaign Members
         </CardTitle>
         <CardDescription>
-          {campaign?.name && `Members of "${campaign.name}"`}
-          {members.length > 0 && ` • ${members.length} member${members.length !== 1 ? "s" : ""}`}
+          {members.length} {members.length === 1 ? "member" : "members"} in this campaign
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {members.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
-            <p>No members found</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {members.map((member) => (
-              <div key={member.id} className="flex items-center justify-between p-3 rounded-lg border">
+        <div className="space-y-4">
+          {members.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p>No members found</p>
+              <p className="text-sm">Invite players to get started</p>
+            </div>
+          ) : (
+            members.map((member) => (
+              <div key={member.id} className="flex items-center justify-between p-4 border rounded-lg">
                 <div className="flex items-center gap-3">
-                  <Avatar className="h-10 w-10">
-                    <AvatarImage src={member.users.image_url || "/placeholder.svg"} />
-                    <AvatarFallback>{getInitials(member.users.name, member.users.email)}</AvatarFallback>
+                  <Avatar>
+                    <AvatarImage src={member.user?.avatar_url || "/placeholder.svg"} />
+                    <AvatarFallback>{getUserInitials(member)}</AvatarFallback>
                   </Avatar>
 
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium truncate">{member.users.name || member.users.email}</p>
-                      <Badge
-                        variant={member.role === "DM" ? "default" : "secondary"}
-                        className="flex items-center gap-1"
-                      >
-                        {member.role === "DM" ? <Crown className="h-3 w-3" /> : <User className="h-3 w-3" />}
-                        {member.role}
-                      </Badge>
+                  <div>
+                    <div className="font-medium">{getUserDisplayName(member)}</div>
+                    <div className="text-sm text-muted-foreground">
+                      Joined {new Date(member.joined_at).toLocaleDateString()}
                     </div>
-
-                    <p className="text-sm text-muted-foreground truncate">{member.users.email}</p>
-
-                    <p className="text-xs text-muted-foreground">Joined {formatDate(member.joined_at)}</p>
                   </div>
                 </div>
+
+                <Badge variant={getRoleBadgeVariant(member.role)} className="flex items-center gap-1">
+                  {getRoleIcon(member.role)}
+                  {member.role}
+                </Badge>
               </div>
-            ))}
-          </div>
-        )}
+            ))
+          )}
+        </div>
       </CardContent>
     </Card>
   )

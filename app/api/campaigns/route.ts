@@ -16,22 +16,19 @@ export async function GET(request: NextRequest) {
 
     const supabase = createAdminClient()
 
-    // Get campaigns owned by user
-    console.log("[api/campaigns] GET fetching owned campaigns", { reqId, userId })
+    // First, get campaigns owned by the user
     const { data: ownedCampaigns, error: ownedError } = await supabase
       .from("campaigns")
       .select("*")
-      .eq("created_by", userId)
+      .eq("owner_id", userId)
 
     if (ownedError) {
       console.log("[api/campaigns] GET owned campaigns error", { reqId, error: ownedError.message })
-      return NextResponse.json({ error: "Failed to fetch owned campaigns" }, { status: 500 })
     }
 
-    // Get campaigns where user is a member (with graceful fallback if table doesn't exist)
+    // Then, get campaigns where user is a member (if campaign_members table exists)
     let memberCampaigns: any[] = []
     try {
-      console.log("[api/campaigns] GET fetching member campaigns", { reqId, userId })
       const { data: memberData, error: memberError } = await supabase
         .from("campaign_members")
         .select(`
@@ -44,32 +41,29 @@ export async function GET(request: NextRequest) {
 
       if (memberError) {
         console.log("[api/campaigns] GET member campaigns error", { reqId, error: memberError.message })
-        // If campaign_members table doesn't exist, continue with just owned campaigns
-        if (memberError.message.includes("does not exist") || memberError.message.includes("schema cache")) {
-          console.log("[api/campaigns] GET campaign_members table not found, using owned campaigns only", { reqId })
-        } else {
-          throw memberError
-        }
-      } else {
-        memberCampaigns =
-          memberData?.map((m) => ({
-            ...m.campaigns,
-            user_role: m.role,
-            joined_at: m.joined_at,
-          })) || []
+      } else if (memberData) {
+        memberCampaigns = memberData.map((member) => ({
+          ...member.campaigns,
+          user_role: member.role,
+          joined_at: member.joined_at,
+        }))
       }
-    } catch (error: any) {
-      console.log("[api/campaigns] GET member campaigns error", { reqId, error: error.message })
-      // Continue with just owned campaigns if member table query fails
+    } catch (error) {
+      console.log("[api/campaigns] GET member campaigns table not found", { reqId, error: (error as Error).message })
+      // Table doesn't exist yet, that's okay
     }
 
     // Combine owned and member campaigns, avoiding duplicates
-    const ownedIds = new Set(ownedCampaigns?.map((c) => c.id) || [])
-    const uniqueMemberCampaigns = memberCampaigns.filter((c) => !ownedIds.has(c.id))
+    const allCampaigns = [...(ownedCampaigns || [])]
 
-    const allCampaigns = [...(ownedCampaigns?.map((c) => ({ ...c, user_role: "DM" })) || []), ...uniqueMemberCampaigns]
+    // Add member campaigns that aren't already owned
+    memberCampaigns.forEach((memberCampaign) => {
+      if (!allCampaigns.find((owned) => owned.id === memberCampaign.id)) {
+        allCampaigns.push(memberCampaign)
+      }
+    })
 
-    // Sort by creation date
+    // Sort by created_at descending
     allCampaigns.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
     console.log("[api/campaigns] GET success", {
@@ -79,10 +73,10 @@ export async function GET(request: NextRequest) {
       totalCount: allCampaigns.length,
     })
 
-    return NextResponse.json({ campaigns: allCampaigns })
-  } catch (error: any) {
-    console.error("[api/campaigns] GET error", { reqId, error: error.message })
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return NextResponse.json(allCampaigns)
+  } catch (error) {
+    console.error("[api/campaigns] GET error", { reqId, error: (error as Error).message })
+    return NextResponse.json({ error: "Failed to fetch campaigns" }, { status: 500 })
   }
 }
 
@@ -114,7 +108,7 @@ export async function POST(request: NextRequest) {
       .insert({
         name,
         description: description || "",
-        created_by: userId,
+        owner_id: userId,
         settings: {
           players: [],
           shop_enabled: false,

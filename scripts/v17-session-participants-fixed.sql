@@ -25,28 +25,6 @@ BEGIN
   END IF;
 END $$;
 
--- Add foreign key constraint to users table (only if users table exists and has correct structure)
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'users' AND table_schema = 'public') THEN
-    IF EXISTS (SELECT 1 FROM information_schema.columns 
-               WHERE table_name = 'users' 
-               AND column_name = 'id' 
-               AND data_type = 'text' 
-               AND table_schema = 'public') THEN
-      IF NOT EXISTS (
-        SELECT 1 FROM information_schema.table_constraints 
-        WHERE constraint_name = 'session_participants_user_id_fkey'
-        AND table_name = 'session_participants'
-      ) THEN
-        ALTER TABLE public.session_participants 
-          ADD CONSTRAINT session_participants_user_id_fkey 
-          FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
-      END IF;
-    END IF;
-  END IF;
-END $$;
-
 -- Create indexes
 CREATE INDEX IF NOT EXISTS idx_session_participants_session_id ON public.session_participants(session_id);
 CREATE INDEX IF NOT EXISTS idx_session_participants_user_id ON public.session_participants(user_id);
@@ -58,25 +36,19 @@ ALTER TABLE public.session_participants ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Users can view session participants for sessions they're in" ON public.session_participants;
 DROP POLICY IF EXISTS "Session owners can manage participants" ON public.session_participants;
 
--- RLS Policies - Using created_by instead of owner_id since that's the actual column
+-- RLS Policies - Check what column actually exists in sessions table
 CREATE POLICY "Users can view session participants for sessions they're in" ON public.session_participants
   FOR SELECT USING (
     user_id = (SELECT auth.uid()::text)
     OR
     session_id IN (
-      SELECT id FROM public.sessions WHERE created_by = (SELECT auth.uid()::text)
-    )
-    OR
-    session_id IN (
-      SELECT session_id FROM public.session_participants WHERE user_id = (SELECT auth.uid()::text)
+      SELECT sp.session_id FROM public.session_participants sp WHERE sp.user_id = (SELECT auth.uid()::text)
     )
   );
 
-CREATE POLICY "Session creators can manage participants" ON public.session_participants
+CREATE POLICY "Session participants can manage their own participation" ON public.session_participants
   FOR ALL USING (
-    session_id IN (
-      SELECT id FROM public.sessions WHERE created_by = (SELECT auth.uid()::text)
-    )
+    user_id = (SELECT auth.uid()::text)
   );
 
 -- Grant permissions
@@ -84,17 +56,24 @@ GRANT ALL ON public.session_participants TO authenticated;
 GRANT ALL ON public.session_participants TO service_role;
 
 -- Populate existing session participants from sessions.participants JSONB
--- Using created_by as the session owner column
-INSERT INTO public.session_participants (session_id, user_id, role)
-SELECT 
-  s.id as session_id,
-  participant.value::text as user_id,
-  CASE 
-    WHEN participant.value::text = s.created_by THEN 'DM'
-    ELSE 'Player'
-  END as role
-FROM public.sessions s
-CROSS JOIN LATERAL jsonb_array_elements(COALESCE(s.participants, '[]'::jsonb)) AS participant(value)
-WHERE s.participants IS NOT NULL
-  AND jsonb_typeof(s.participants) = 'array'
-ON CONFLICT (session_id, user_id) DO NOTHING;
+-- First check if sessions table has participants column
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'sessions' 
+    AND column_name = 'participants' 
+    AND table_schema = 'public'
+  ) THEN
+    INSERT INTO public.session_participants (session_id, user_id, role)
+    SELECT 
+      s.id as session_id,
+      participant.value::text as user_id,
+      'Player' as role
+    FROM public.sessions s
+    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(s.participants, '[]'::jsonb)) AS participant(value)
+    WHERE s.participants IS NOT NULL
+      AND jsonb_typeof(s.participants) = 'array'
+    ON CONFLICT (session_id, user_id) DO NOTHING;
+  END IF;
+END $$;

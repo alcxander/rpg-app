@@ -20,12 +20,12 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     // Verify user has access to this campaign
     const { data: campaign, error: campaignError } = await supabase
       .from("campaigns")
-      .select("owner_id")
+      .select("*")
       .eq("id", campaignId)
       .single()
 
     if (campaignError || !campaign) {
-      console.log("[api/campaigns/members] Campaign not found", { reqId, error: campaignError })
+      console.log("[api/campaigns/members] Campaign not found", { reqId, error: campaignError?.message })
       return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
     }
 
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     if (!isOwner) {
       const { data: memberCheck } = await supabase
         .from("campaign_members")
-        .select("id")
+        .select("*")
         .eq("campaign_id", campaignId)
         .eq("user_id", userId)
         .single()
@@ -53,14 +53,11 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const { data: members, error: membersError } = await supabase
       .from("campaign_members")
       .select(`
-        id,
-        user_id,
-        role,
-        joined_at,
+        *,
         users (
           id,
-          name,
           email,
+          name,
           avatar_url
         )
       `)
@@ -68,14 +65,42 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       .order("joined_at", { ascending: true })
 
     if (membersError) {
-      console.log("[api/campaigns/members] Failed to fetch members", { reqId, error: membersError })
+      console.log("[api/campaigns/members] Failed to fetch members", { reqId, error: membersError.message })
       return NextResponse.json({ error: "Failed to fetch members" }, { status: 500 })
     }
 
-    console.log("[api/campaigns/members] GET success", { reqId, count: members?.length || 0 })
+    // Add campaign owner as a member if not already in the list
+    const ownerInMembers = members?.some((m) => m.user_id === campaign.owner_id)
+    let allMembers = members || []
+
+    if (!ownerInMembers) {
+      // Get owner details
+      const { data: owner } = await supabase
+        .from("users")
+        .select("id, email, name, avatar_url")
+        .eq("id", campaign.owner_id)
+        .single()
+
+      if (owner) {
+        allMembers = [
+          {
+            id: "owner",
+            campaign_id: campaignId,
+            user_id: campaign.owner_id,
+            role: "DM",
+            joined_at: campaign.created_at,
+            added_by: null,
+            users: owner,
+          },
+          ...allMembers,
+        ]
+      }
+    }
+
+    console.log("[api/campaigns/members] GET success", { reqId, memberCount: allMembers.length })
 
     return NextResponse.json({
-      members: members || [],
+      members: allMembers,
     })
   } catch (error) {
     console.error("[api/campaigns/members] GET error", {

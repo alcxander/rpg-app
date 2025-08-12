@@ -4,18 +4,18 @@ import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Users, Crown, Shield, User } from "lucide-react"
+import { Users, Crown, User } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
-interface Member {
+interface CampaignMember {
   id: string
   user_id: string
   role: string
   joined_at: string
   users: {
     id: string
+    email: string
     name?: string
-    email?: string
     avatar_url?: string
   }
 }
@@ -26,7 +26,7 @@ interface CampaignMembersListProps {
 }
 
 export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMembersListProps) {
-  const [members, setMembers] = useState<Member[]>([])
+  const [members, setMembers] = useState<CampaignMember[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const { toast } = useToast()
 
@@ -40,7 +40,7 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
 
       const data = await response.json()
       setMembers(data.members || [])
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to fetch members:", error)
       toast({
         title: "Error",
@@ -56,26 +56,27 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
     fetchMembers()
   }, [campaignId, refreshTrigger])
 
-  const getRoleIcon = (role: string) => {
-    switch (role) {
-      case "Owner":
-        return <Crown className="h-4 w-4" />
-      case "DM":
-        return <Shield className="h-4 w-4" />
-      default:
-        return <User className="h-4 w-4" />
+  const getInitials = (name?: string, email?: string) => {
+    if (name) {
+      return name
+        .split(" ")
+        .map((n) => n[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2)
     }
+    if (email) {
+      return email.slice(0, 2).toUpperCase()
+    }
+    return "U"
   }
 
-  const getRoleColor = (role: string) => {
-    switch (role) {
-      case "Owner":
-        return "bg-yellow-100 text-yellow-800"
-      case "DM":
-        return "bg-blue-100 text-blue-800"
-      default:
-        return "bg-gray-100 text-gray-800"
-    }
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    })
   }
 
   if (isLoading) {
@@ -89,7 +90,7 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-center py-8">
-            <div className="text-sm text-muted-foreground">Loading members...</div>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           </div>
         </CardContent>
       </Card>
@@ -108,34 +109,47 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {members.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            No members found. Invite some players to get started!
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {members.map((member) => (
-              <div key={member.id} className="flex items-center justify-between p-3 border rounded-lg">
+        <div className="space-y-4">
+          {members.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p>No members found</p>
+              <p className="text-sm">Invite players to get started</p>
+            </div>
+          ) : (
+            members.map((member) => (
+              <div key={member.id} className="flex items-center justify-between p-4 border rounded-lg">
                 <div className="flex items-center gap-3">
                   <Avatar className="h-10 w-10">
                     <AvatarImage src={member.users.avatar_url || "/placeholder.svg"} />
-                    <AvatarFallback>{member.users.name?.[0] || member.users.email?.[0] || "?"}</AvatarFallback>
+                    <AvatarFallback>{getInitials(member.users.name, member.users.email)}</AvatarFallback>
                   </Avatar>
+
                   <div>
-                    <div className="font-medium">{member.users.name || member.users.email || "Unknown User"}</div>
-                    <div className="text-sm text-muted-foreground">
-                      Joined {new Date(member.joined_at).toLocaleDateString()}
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium">{member.users.name || member.users.email}</p>
+                      <Badge variant={member.role === "DM" ? "default" : "secondary"} className="text-xs">
+                        {member.role === "DM" ? (
+                          <>
+                            <Crown className="h-3 w-3 mr-1" />
+                            DM
+                          </>
+                        ) : (
+                          <>
+                            <User className="h-3 w-3 mr-1" />
+                            Player
+                          </>
+                        )}
+                      </Badge>
                     </div>
+                    <p className="text-sm text-muted-foreground">{member.users.email}</p>
+                    <p className="text-xs text-muted-foreground">Joined {formatDate(member.joined_at)}</p>
                   </div>
                 </div>
-                <Badge className={`flex items-center gap-1 ${getRoleColor(member.role)}`}>
-                  {getRoleIcon(member.role)}
-                  {member.role}
-                </Badge>
               </div>
-            ))}
-          </div>
-        )}
+            ))
+          )}
+        </div>
       </CardContent>
     </Card>
   )

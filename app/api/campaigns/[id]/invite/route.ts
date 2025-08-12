@@ -141,10 +141,32 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       }
     }
 
+    // Broadcast realtime event
+    try {
+      const channel = supabase.channel(`campaign:${campaignId}`)
+      await channel.send({
+        type: "broadcast",
+        event: "CAMPAIGN_MEMBER_ADDED",
+        payload: {
+          member: {
+            id: newMember.id,
+            user_id: inviteeId,
+            role: "Player",
+            joined_at: newMember.joined_at,
+            user: inviteeUser,
+          },
+        },
+      })
+    } catch (realtimeError) {
+      console.log("[api/campaigns/invite] Realtime broadcast failed", { reqId, error: realtimeError })
+      // Continue - this is not critical
+    }
+
     console.log("[api/campaigns/invite] POST success", { reqId, memberId: newMember.id })
 
     return NextResponse.json({
       success: true,
+      already_member: false,
       member: {
         id: newMember.id,
         user_id: inviteeId,

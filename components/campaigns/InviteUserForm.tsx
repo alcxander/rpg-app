@@ -54,21 +54,24 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
       if (data.already_member) {
         toast({
           title: "Already a member",
-          description: data.message || "This user is already a member of the campaign",
+          description: "This user is already a member of the campaign",
+          variant: "default",
         })
       } else {
         toast({
-          title: "Success!",
-          description: data.message || "User has been invited to the campaign",
+          title: "Invitation sent!",
+          description: `Successfully added ${data.member?.user?.name || data.member?.user?.email || inviteeId} to the campaign`,
+          variant: "default",
         })
+
         setInviteeId("")
         onInviteSuccess?.()
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Invite error:", error)
       toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to invite user",
+        title: "Invitation failed",
+        description: error.message || "Failed to invite user. Please try again.",
         variant: "destructive",
       })
     } finally {
@@ -96,13 +99,18 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
               value={inviteeId}
               onChange={(e) => setInviteeId(e.target.value)}
               disabled={isLoading}
+              className="w-full"
             />
+            <p className="text-sm text-muted-foreground">
+              You can find user IDs in the user management section or ask the player for their ID
+            </p>
           </div>
-          <Button type="submit" disabled={isLoading || !inviteeId.trim()}>
+
+          <Button type="submit" disabled={isLoading || !inviteeId.trim()} className="w-full">
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Inviting...
+                Sending invitation...
               </>
             ) : (
               <>

@@ -1,27 +1,26 @@
 "use client"
 
-import { useState } from "react"
+import { use, useState } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { InviteUserForm } from "@/components/campaigns/InviteUserForm"
 import { CampaignMembersList } from "@/components/campaigns/CampaignMembersList"
 import { Settings, Users, UserPlus } from "lucide-react"
 
 interface CampaignSettingsPageProps {
-  params: {
-    id: string
-  }
+  params: Promise<{ id: string }>
 }
 
 export default function CampaignSettingsPage({ params }: CampaignSettingsPageProps) {
+  const { id: campaignId } = use(params)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
 
   const handleInviteSuccess = () => {
-    // Trigger a refresh of the members list
+    // Trigger refresh of members list
     setRefreshTrigger((prev) => prev + 1)
   }
 
   return (
-    <div className="container mx-auto py-8">
+    <div className="container mx-auto py-8 px-4">
       <div className="mb-8">
         <h1 className="text-3xl font-bold flex items-center gap-2">
           <Settings className="h-8 w-8" />
@@ -31,7 +30,7 @@ export default function CampaignSettingsPage({ params }: CampaignSettingsPagePro
       </div>
 
       <Tabs defaultValue="members" className="space-y-6">
-        <TabsList>
+        <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="members" className="flex items-center gap-2">
             <Users className="h-4 w-4" />
             Members
@@ -42,12 +41,17 @@ export default function CampaignSettingsPage({ params }: CampaignSettingsPagePro
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="members">
-          <CampaignMembersList campaignId={params.id} refreshTrigger={refreshTrigger} />
+        <TabsContent value="members" className="space-y-6">
+          <CampaignMembersList campaignId={campaignId} refreshTrigger={refreshTrigger} />
         </TabsContent>
 
-        <TabsContent value="invite">
-          <InviteUserForm campaignId={params.id} onInviteSuccess={handleInviteSuccess} />
+        <TabsContent value="invite" className="space-y-6">
+          <InviteUserForm campaignId={campaignId} onInviteSuccess={handleInviteSuccess} />
+
+          <div className="mt-8">
+            <h3 className="text-lg font-semibold mb-4">Recent Invitations</h3>
+            <CampaignMembersList campaignId={campaignId} refreshTrigger={refreshTrigger} />
+          </div>
         </TabsContent>
       </Tabs>
     </div>

@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS public.session_participants (
   session_id text NOT NULL,
   user_id text NOT NULL,
   joined_at timestamptz DEFAULT now(),
+  role text DEFAULT 'Player', -- 'Player' or 'DM'
   CONSTRAINT session_participants_pkey PRIMARY KEY (id),
   CONSTRAINT session_participants_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.sessions(id) ON DELETE CASCADE,
   CONSTRAINT session_participants_unique UNIQUE (session_id, user_id)
@@ -35,22 +36,40 @@ CREATE INDEX IF NOT EXISTS idx_session_participants_user_id ON public.session_pa
 ALTER TABLE public.session_participants ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies
-CREATE POLICY "Users can view session participants" ON public.session_participants
+CREATE POLICY "Users can view session participants for sessions they're in" ON public.session_participants
   FOR SELECT USING (
     user_id = (SELECT auth.uid()::text)
     OR
     session_id IN (
-      SELECT id FROM public.sessions WHERE created_by = (SELECT auth.uid()::text)
+      SELECT id FROM public.sessions WHERE owner_id = (SELECT auth.uid()::text)
+    )
+    OR
+    session_id IN (
+      SELECT session_id FROM public.session_participants WHERE user_id = (SELECT auth.uid()::text)
     )
   );
 
-CREATE POLICY "Session creators can manage participants" ON public.session_participants
+CREATE POLICY "Session owners can manage participants" ON public.session_participants
   FOR ALL USING (
     session_id IN (
-      SELECT id FROM public.sessions WHERE created_by = (SELECT auth.uid()::text)
+      SELECT id FROM public.sessions WHERE owner_id = (SELECT auth.uid()::text)
     )
   );
 
 -- Grant permissions
 GRANT ALL ON public.session_participants TO authenticated;
 GRANT ALL ON public.session_participants TO service_role;
+
+-- Populate existing session participants from sessions.participants JSONB
+INSERT INTO public.session_participants (session_id, user_id, role)
+SELECT 
+  s.id as session_id,
+  participant.value::text as user_id,
+  CASE 
+    WHEN participant.value::text = s.owner_id THEN 'DM'
+    ELSE 'Player'
+  END as role
+FROM public.sessions s
+CROSS JOIN LATERAL jsonb_array_elements(COALESCE(s.participants, '[]'::jsonb)) AS participant(value)
+WHERE s.participants IS NOT NULL
+ON CONFLICT (session_id, user_id) DO NOTHING;

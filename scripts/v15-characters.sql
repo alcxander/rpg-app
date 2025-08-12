@@ -3,7 +3,7 @@
 CREATE TABLE IF NOT EXISTS public.characters (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id text NOT NULL,
-  campaign_id uuid,
+  campaign_id uuid NULL,
   name text NOT NULL,
   race text,
   alignment text,
@@ -12,9 +12,9 @@ CREATE TABLE IF NOT EXISTS public.characters (
   stats jsonb DEFAULT '{}'::jsonb,
   current_hp integer,
   max_hp integer,
+  gold numeric DEFAULT 0,
   portrait_url text,
   notes text,
-  gold numeric DEFAULT 0,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now(),
   CONSTRAINT characters_pkey PRIMARY KEY (id),
@@ -77,6 +77,6 @@ CREATE POLICY "Users can manage their character inventories" ON public.character
 
 -- Grant permissions
 GRANT ALL ON public.characters TO authenticated;
-GRANT ALL ON public.character_inventories TO authenticated;
 GRANT ALL ON public.characters TO service_role;
+GRANT ALL ON public.character_inventories TO authenticated;
 GRANT ALL ON public.character_inventories TO service_role;

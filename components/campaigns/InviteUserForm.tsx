@@ -54,23 +54,20 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
       if (data.already_member) {
         toast({
           title: "Already a member",
-          description: "This user is already a member of the campaign",
-          variant: "default",
+          description: data.message || "This user is already a member of the campaign",
         })
       } else {
         toast({
           title: "Success!",
-          description: `Successfully invited ${data.member?.user?.name || inviteeId} to the campaign`,
-          variant: "default",
+          description: data.message || "User has been invited to the campaign",
         })
-
         setInviteeId("")
         onInviteSuccess?.()
       }
     } catch (error) {
       console.error("Invite error:", error)
       toast({
-        title: "Invite failed",
+        title: "Error",
         description: error instanceof Error ? error.message : "Failed to invite user",
         variant: "destructive",
       })
@@ -95,18 +92,13 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
             <Input
               id="inviteeId"
               type="text"
-              placeholder="Enter user ID (e.g., user_abc123...)"
+              placeholder="Enter user ID (e.g., user_abc123)"
               value={inviteeId}
               onChange={(e) => setInviteeId(e.target.value)}
               disabled={isLoading}
-              className="font-mono text-sm"
             />
-            <p className="text-xs text-muted-foreground">
-              You can find user IDs in your Clerk dashboard or ask users to share their ID
-            </p>
           </div>
-
-          <Button type="submit" disabled={isLoading || !inviteeId.trim()} className="w-full">
+          <Button type="submit" disabled={isLoading || !inviteeId.trim()}>
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -115,7 +107,7 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
             ) : (
               <>
                 <UserPlus className="mr-2 h-4 w-4" />
-                Send Invite
+                Invite Player
               </>
             )}
           </Button>

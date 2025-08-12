@@ -7,16 +7,16 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Users, Crown, Shield, User } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
-interface CampaignMember {
+interface Member {
   id: string
   user_id: string
   role: string
   joined_at: string
   users: {
     id: string
-    name: string
-    email: string
-    image_url?: string
+    name?: string
+    email?: string
+    avatar_url?: string
   }
 }
 
@@ -26,7 +26,7 @@ interface CampaignMembersListProps {
 }
 
 export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMembersListProps) {
-  const [members, setMembers] = useState<CampaignMember[]>([])
+  const [members, setMembers] = useState<Member[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const { toast } = useToast()
 
@@ -39,7 +39,7 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
       }
 
       const data = await response.json()
-      setMembers(data)
+      setMembers(data.members || [])
     } catch (error) {
       console.error("Failed to fetch members:", error)
       toast({
@@ -70,11 +70,11 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
   const getRoleColor = (role: string) => {
     switch (role) {
       case "Owner":
-        return "bg-yellow-100 text-yellow-800 border-yellow-200"
+        return "bg-yellow-100 text-yellow-800"
       case "DM":
-        return "bg-purple-100 text-purple-800 border-purple-200"
+        return "bg-blue-100 text-blue-800"
       default:
-        return "bg-blue-100 text-blue-800 border-blue-200"
+        return "bg-gray-100 text-gray-800"
     }
   }
 
@@ -88,16 +88,8 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-3">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="flex items-center space-x-3 animate-pulse">
-                <div className="w-10 h-10 bg-gray-200 rounded-full" />
-                <div className="flex-1 space-y-1">
-                  <div className="h-4 bg-gray-200 rounded w-1/3" />
-                  <div className="h-3 bg-gray-200 rounded w-1/2" />
-                </div>
-              </div>
-            ))}
+          <div className="flex items-center justify-center py-8">
+            <div className="text-sm text-muted-foreground">Loading members...</div>
           </div>
         </CardContent>
       </Card>
@@ -112,41 +104,38 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
           Campaign Members
         </CardTitle>
         <CardDescription>
-          {members.length} member{members.length !== 1 ? "s" : ""} in this campaign
+          {members.length} {members.length === 1 ? "member" : "members"} in this campaign
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="space-y-3">
-          {members.map((member) => (
-            <div key={member.id} className="flex items-center justify-between p-3 border rounded-lg">
-              <div className="flex items-center space-x-3">
-                <Avatar>
-                  <AvatarImage src={member.users.image_url || "/placeholder.svg"} />
-                  <AvatarFallback>{member.users.name?.charAt(0)?.toUpperCase() || "U"}</AvatarFallback>
-                </Avatar>
-                <div>
-                  <p className="font-medium">{member.users.name || "Unknown User"}</p>
-                  <p className="text-sm text-muted-foreground">{member.users.email}</p>
-                  <p className="text-xs text-muted-foreground">
-                    Joined {new Date(member.joined_at).toLocaleDateString()}
-                  </p>
+        {members.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            No members found. Invite some players to get started!
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {members.map((member) => (
+              <div key={member.id} className="flex items-center justify-between p-3 border rounded-lg">
+                <div className="flex items-center gap-3">
+                  <Avatar className="h-10 w-10">
+                    <AvatarImage src={member.users.avatar_url || "/placeholder.svg"} />
+                    <AvatarFallback>{member.users.name?.[0] || member.users.email?.[0] || "?"}</AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <div className="font-medium">{member.users.name || member.users.email || "Unknown User"}</div>
+                    <div className="text-sm text-muted-foreground">
+                      Joined {new Date(member.joined_at).toLocaleDateString()}
+                    </div>
+                  </div>
                 </div>
+                <Badge className={`flex items-center gap-1 ${getRoleColor(member.role)}`}>
+                  {getRoleIcon(member.role)}
+                  {member.role}
+                </Badge>
               </div>
-              <Badge className={getRoleColor(member.role)}>
-                {getRoleIcon(member.role)}
-                <span className="ml-1">{member.role}</span>
-              </Badge>
-            </div>
-          ))}
-
-          {members.length === 0 && (
-            <div className="text-center py-8 text-muted-foreground">
-              <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>No members found</p>
-              <p className="text-sm">Invite players to get started</p>
-            </div>
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   )

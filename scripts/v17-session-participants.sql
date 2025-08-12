@@ -40,14 +40,14 @@ CREATE POLICY "Users can view session participants" ON public.session_participan
     user_id = (SELECT auth.uid()::text)
     OR
     session_id IN (
-      SELECT id FROM public.sessions WHERE owner_id = (SELECT auth.uid()::text)
+      SELECT id FROM public.sessions WHERE created_by = (SELECT auth.uid()::text)
     )
   );
 
-CREATE POLICY "Session owners can manage participants" ON public.session_participants
+CREATE POLICY "Session creators can manage participants" ON public.session_participants
   FOR ALL USING (
     session_id IN (
-      SELECT id FROM public.sessions WHERE owner_id = (SELECT auth.uid()::text)
+      SELECT id FROM public.sessions WHERE created_by = (SELECT auth.uid()::text)
     )
   );
 

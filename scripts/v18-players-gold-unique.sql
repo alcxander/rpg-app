@@ -1,15 +1,14 @@
 -- Migration v18: Add unique constraint to players_gold
 
--- Add unique constraint if it doesn't exist
 DO $$
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint 
-        WHERE conname = 'players_gold_unique'
-    ) THEN
-        ALTER TABLE public.players_gold
-        ADD CONSTRAINT players_gold_unique UNIQUE (player_id, campaign_id);
-    END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints 
+    WHERE constraint_name = 'players_gold_unique'
+  ) THEN
+    ALTER TABLE public.players_gold
+      ADD CONSTRAINT players_gold_unique UNIQUE (player_id, campaign_id);
+  END IF;
 END $$;
 
 -- Create index for performance

@@ -10,6 +10,7 @@ export async function GET(request: NextRequest) {
     console.log("[api/campaigns] GET start", { reqId, hasUser: !!userId })
 
     if (!userId) {
+      console.log("[api/campaigns] GET unauthorized", { reqId })
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Failed to fetch owned campaigns" }, { status: 500 })
     }
 
-    // Get campaigns where user is a member (with graceful fallback)
+    // Get campaigns where user is a member (with graceful fallback if table doesn't exist)
     let memberCampaigns: any[] = []
     try {
       const { data: memberData, error: memberError } = await supabase
@@ -41,48 +42,46 @@ export async function GET(request: NextRequest) {
 
       if (memberError) {
         console.log("[api/campaigns] GET member campaigns error", { reqId, error: memberError.message })
-        // If campaign_members table doesn't exist, gracefully continue with empty array
-        if (!memberError.message.includes("does not exist") && !memberError.message.includes("schema cache")) {
-          return NextResponse.json({ error: "Failed to fetch member campaigns" }, { status: 500 })
+        // If campaign_members table doesn't exist, continue with just owned campaigns
+        if (memberError.message.includes("does not exist") || memberError.message.includes("schema cache")) {
+          console.log("[api/campaigns] campaign_members table not found, using owned campaigns only", { reqId })
+        } else {
+          throw memberError
         }
-      } else if (memberData) {
-        memberCampaigns = memberData
-          .filter((member) => member.campaigns)
-          .map((member) => ({
-            ...member.campaigns,
-            user_role: member.role,
-            joined_at: member.joined_at,
-          }))
+      } else {
+        memberCampaigns =
+          memberData?.map((m) => ({
+            ...m.campaigns,
+            user_role: m.role,
+            joined_at: m.joined_at,
+          })) || []
       }
     } catch (error: any) {
       console.log("[api/campaigns] GET member campaigns error", { reqId, error: error.message })
-      // Continue with empty member campaigns if table doesn't exist
+      // Continue with just owned campaigns if member query fails
     }
 
     // Combine and deduplicate campaigns
-    const allCampaigns = [...(ownedCampaigns || []), ...memberCampaigns]
-    const uniqueCampaigns = allCampaigns.reduce((acc, campaign) => {
-      const existing = acc.find((c) => c.id === campaign.id)
-      if (!existing) {
-        acc.push({
-          ...campaign,
-          user_role: campaign.owner_id === userId ? "DM" : campaign.user_role || "Player",
-        })
-      }
-      return acc
-    }, [] as any[])
+    const allCampaigns = [...(ownedCampaigns || [])]
 
-    // Sort by creation date
-    uniqueCampaigns.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    // Add member campaigns that aren't already owned
+    memberCampaigns.forEach((memberCampaign) => {
+      if (!allCampaigns.find((c) => c.id === memberCampaign.id)) {
+        allCampaigns.push(memberCampaign)
+      }
+    })
+
+    // Sort by created_at descending
+    allCampaigns.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
     console.log("[api/campaigns] GET success", {
       reqId,
       ownedCount: ownedCampaigns?.length || 0,
       memberCount: memberCampaigns.length,
-      totalCount: uniqueCampaigns.length,
+      totalCount: allCampaigns.length,
     })
 
-    return NextResponse.json({ campaigns: uniqueCampaigns })
+    return NextResponse.json(allCampaigns)
   } catch (error: any) {
     console.error("[api/campaigns] GET error", { reqId, error: error.message })
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })

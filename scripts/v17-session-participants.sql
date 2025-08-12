@@ -1,4 +1,4 @@
--- Migration: Add normalized session_participants table
+-- Migration v17: Add normalized session_participants table
 -- This provides better querying and syncing than relying only on sessions.participants JSONB
 
 CREATE TABLE IF NOT EXISTS public.session_participants (
@@ -8,11 +8,24 @@ CREATE TABLE IF NOT EXISTS public.session_participants (
   joined_at timestamptz DEFAULT now(),
   role text DEFAULT 'Player', -- 'Player' or 'DM'
   CONSTRAINT session_participants_pkey PRIMARY KEY (id),
-  CONSTRAINT session_participants_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.sessions(id) ON DELETE CASCADE,
   CONSTRAINT session_participants_unique UNIQUE (session_id, user_id)
 );
 
--- Add foreign key constraints
+-- Add foreign key constraint to sessions table
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints 
+    WHERE constraint_name = 'session_participants_session_id_fkey'
+    AND table_name = 'session_participants'
+  ) THEN
+    ALTER TABLE public.session_participants 
+      ADD CONSTRAINT session_participants_session_id_fkey 
+      FOREIGN KEY (session_id) REFERENCES public.sessions(id) ON DELETE CASCADE;
+  END IF;
+END $$;
+
+-- Add foreign key constraint to users table (only if users table exists and has correct structure)
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'users' AND table_schema = 'public') THEN
@@ -21,9 +34,15 @@ BEGIN
                AND column_name = 'id' 
                AND data_type = 'text' 
                AND table_schema = 'public') THEN
-      ALTER TABLE public.session_participants 
-        ADD CONSTRAINT session_participants_user_id_fkey 
-        FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints 
+        WHERE constraint_name = 'session_participants_user_id_fkey'
+        AND table_name = 'session_participants'
+      ) THEN
+        ALTER TABLE public.session_participants 
+          ADD CONSTRAINT session_participants_user_id_fkey 
+          FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+      END IF;
     END IF;
   END IF;
 END $$;
@@ -34,6 +53,10 @@ CREATE INDEX IF NOT EXISTS idx_session_participants_user_id ON public.session_pa
 
 -- Enable RLS
 ALTER TABLE public.session_participants ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing policies if they exist
+DROP POLICY IF EXISTS "Users can view session participants for sessions they're in" ON public.session_participants;
+DROP POLICY IF EXISTS "Session owners can manage participants" ON public.session_participants;
 
 -- RLS Policies
 CREATE POLICY "Users can view session participants for sessions they're in" ON public.session_participants
@@ -72,4 +95,5 @@ SELECT
 FROM public.sessions s
 CROSS JOIN LATERAL jsonb_array_elements(COALESCE(s.participants, '[]'::jsonb)) AS participant(value)
 WHERE s.participants IS NOT NULL
+  AND jsonb_typeof(s.participants) = 'array'
 ON CONFLICT (session_id, user_id) DO NOTHING;

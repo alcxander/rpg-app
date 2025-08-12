@@ -2,51 +2,42 @@ import { type NextRequest, NextResponse } from "next/server"
 import { getAuth } from "@clerk/nextjs/server"
 import { createAdminClient } from "@/lib/supabaseAdmin"
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const reqId = Math.random().toString(36).substring(7)
-  const campaignId = params.id
 
   try {
-    console.log("[api/campaigns/members] GET start", { reqId, campaignId })
-
     const { userId } = await getAuth(request)
+    const { id: campaignId } = await params
+
+    console.log("[api/campaigns/members] GET start", { reqId, userId, campaignId })
+
     if (!userId) {
-      console.log("[api/campaigns/members] GET unauthorized", { reqId })
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
     const supabase = createAdminClient()
 
-    // Verify user has access to this campaign
-    const { data: campaign, error: campaignError } = await supabase
-      .from("campaigns")
-      .select("*")
-      .eq("id", campaignId)
-      .single()
+    // Verify user has access to this campaign (owner or member)
+    const { data: campaign } = await supabase.from("campaigns").select("owner_id").eq("id", campaignId).single()
 
-    if (campaignError || !campaign) {
-      console.log("[api/campaigns/members] Campaign not found", { reqId, error: campaignError?.message })
+    if (!campaign) {
       return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
     }
 
-    // Check if user is owner or member
     const isOwner = campaign.owner_id === userId
-    let isMember = false
 
+    // Check if user is a member if not owner
     if (!isOwner) {
-      const { data: memberCheck } = await supabase
+      const { data: membership } = await supabase
         .from("campaign_members")
         .select("*")
         .eq("campaign_id", campaignId)
         .eq("user_id", userId)
         .single()
 
-      isMember = !!memberCheck
-    }
-
-    if (!isOwner && !isMember) {
-      console.log("[api/campaigns/members] Access denied", { reqId, userId })
-      return NextResponse.json({ error: "Access denied" }, { status: 403 })
+      if (!membership) {
+        return NextResponse.json({ error: "Access denied" }, { status: 403 })
+      }
     }
 
     // Get campaign members with user details
@@ -56,9 +47,9 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         *,
         users (
           id,
-          email,
           name,
-          avatar_url
+          email,
+          image_url
         )
       `)
       .eq("campaign_id", campaignId)
@@ -69,44 +60,38 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       return NextResponse.json({ error: "Failed to fetch members" }, { status: 500 })
     }
 
-    // Add campaign owner as a member if not already in the list
-    const ownerInMembers = members?.some((m) => m.user_id === campaign.owner_id)
-    let allMembers = members || []
+    // Also include the campaign owner if they're not in members table
+    const { data: owner } = await supabase
+      .from("users")
+      .select("id, name, email, image_url")
+      .eq("id", campaign.owner_id)
+      .single()
 
-    if (!ownerInMembers) {
-      // Get owner details
-      const { data: owner } = await supabase
-        .from("users")
-        .select("id, email, name, avatar_url")
-        .eq("id", campaign.owner_id)
-        .single()
+    const ownerAsMember = {
+      id: "owner",
+      campaign_id: campaignId,
+      user_id: campaign.owner_id,
+      role: "DM",
+      joined_at: null,
+      added_by: null,
+      users: owner,
+    }
 
-      if (owner) {
-        allMembers = [
-          {
-            id: "owner",
-            campaign_id: campaignId,
-            user_id: campaign.owner_id,
-            role: "DM",
-            joined_at: campaign.created_at,
-            added_by: null,
-            users: owner,
-          },
-          ...allMembers,
-        ]
-      }
+    // Combine owner and members, avoiding duplicates
+    const allMembers = [ownerAsMember]
+    if (members) {
+      members.forEach((member) => {
+        if (member.user_id !== campaign.owner_id) {
+          allMembers.push(member)
+        }
+      })
     }
 
     console.log("[api/campaigns/members] GET success", { reqId, memberCount: allMembers.length })
 
-    return NextResponse.json({
-      members: allMembers,
-    })
-  } catch (error) {
-    console.error("[api/campaigns/members] GET error", {
-      reqId,
-      error: error instanceof Error ? error.message : "Unknown error",
-    })
+    return NextResponse.json(allMembers)
+  } catch (error: any) {
+    console.error("[api/campaigns/members] GET error", { reqId, error: error.message })
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

@@ -1,10 +1,12 @@
 "use client"
 
-import { use, useState } from "react"
+import { use } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { InviteUserForm } from "@/components/campaigns/InviteUserForm"
 import { CampaignMembersList } from "@/components/campaigns/CampaignMembersList"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Settings, Users, UserPlus } from "lucide-react"
+import { useState } from "react"
 
 interface CampaignSettingsPageProps {
   params: Promise<{ id: string }>
@@ -15,7 +17,7 @@ export default function CampaignSettingsPage({ params }: CampaignSettingsPagePro
   const [refreshTrigger, setRefreshTrigger] = useState(0)
 
   const handleInviteSuccess = () => {
-    // Trigger refresh of members list
+    // Trigger a refresh of the members list
     setRefreshTrigger((prev) => prev + 1)
   }
 
@@ -48,10 +50,32 @@ export default function CampaignSettingsPage({ params }: CampaignSettingsPagePro
         <TabsContent value="invite" className="space-y-6">
           <InviteUserForm campaignId={campaignId} onInviteSuccess={handleInviteSuccess} />
 
-          <div className="mt-8">
-            <h3 className="text-lg font-semibold mb-4">Recent Invitations</h3>
-            <CampaignMembersList campaignId={campaignId} refreshTrigger={refreshTrigger} />
-          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>How to Find User IDs</CardTitle>
+              <CardDescription>Help your players find their user IDs to invite them</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <h4 className="font-medium">For Players:</h4>
+                <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
+                  <li>Go to your profile settings</li>
+                  <li>Look for "User ID" or "Account ID"</li>
+                  <li>Copy the ID (usually starts with "user_")</li>
+                  <li>Share it with your Dungeon Master</li>
+                </ul>
+              </div>
+
+              <div className="space-y-2">
+                <h4 className="font-medium">Alternative Methods:</h4>
+                <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
+                  <li>Ask players to share their profile URL</li>
+                  <li>Use email addresses if supported</li>
+                  <li>Create a shared document for ID collection</li>
+                </ul>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>

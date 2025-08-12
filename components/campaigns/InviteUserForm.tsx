@@ -59,18 +59,21 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
         })
       } else {
         toast({
-          title: "Invitation sent!",
-          description: `Successfully added ${data.member?.user?.name || data.member?.user?.email || inviteeId} to the campaign`,
+          title: "Success!",
+          description: `User ${data.member?.user?.name || inviteeId} has been invited to the campaign`,
           variant: "default",
         })
 
+        // Clear the form
         setInviteeId("")
+
+        // Notify parent component
         onInviteSuccess?.()
       }
     } catch (error: any) {
       console.error("Invite error:", error)
       toast({
-        title: "Invitation failed",
+        title: "Invite failed",
         description: error.message || "Failed to invite user. Please try again.",
         variant: "destructive",
       })
@@ -110,7 +113,7 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Sending invitation...
+                Inviting...
               </>
             ) : (
               <>

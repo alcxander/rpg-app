@@ -27,18 +27,14 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     // Verify the caller is the campaign owner or has DM role
     const { data: campaign, error: campaignError } = await supabase
       .from("campaigns")
-      .select("owner_id, name, settings")
+      .select("*")
       .eq("id", campaignId)
+      .eq("owner_id", userId)
       .single()
 
     if (campaignError || !campaign) {
-      console.log("[api/campaigns/invite] Campaign not found", { reqId, error: campaignError })
-      return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
-    }
-
-    if (campaign.owner_id !== userId) {
-      console.log("[api/campaigns/invite] Not campaign owner", { reqId, userId, ownerId: campaign.owner_id })
-      return NextResponse.json({ error: "Only campaign owners can invite players" }, { status: 403 })
+      console.log("[api/campaigns/invite] Campaign not found or not owned", { reqId, error: campaignError?.message })
+      return NextResponse.json({ error: "Campaign not found or access denied" }, { status: 404 })
     }
 
     // Check if user exists

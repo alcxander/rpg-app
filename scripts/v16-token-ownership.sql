@@ -1,59 +1,50 @@
--- 004_tokens_owner.sql
+-- 017_tokens_owner.sql
 ALTER TABLE public.tokens
-  ADD COLUMN owner_id text NULL,   -- user id who controls it (nullable)
-  ADD COLUMN controlled_by_character_id uuid NULL, -- if token represents a character
-  ADD COLUMN is_locked boolean NOT NULL DEFAULT false,
-  ADD COLUMN position jsonb DEFAULT '{}'::jsonb; -- {x: number, y: number}
+  ADD COLUMN IF NOT EXISTS owner_id text NULL,   -- user id who controls it (nullable)
+  ADD COLUMN IF NOT EXISTS controlled_by_character_id uuid NULL, -- if token represents a character
+  ADD COLUMN IF NOT EXISTS is_locked boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS position jsonb DEFAULT '{}'::jsonb; -- {x: number, y: number, gridX?: number, gridY?: number}
 
-ALTER TABLE public.tokens
-  ADD CONSTRAINT tokens_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.users(id) ON DELETE SET NULL,
-  ADD CONSTRAINT tokens_controlled_by_character_id_fkey FOREIGN KEY (controlled_by_character_id) REFERENCES public.characters(id) ON DELETE SET NULL;
+-- Add foreign key constraints if they don't exist
+DO $$ 
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints 
+                 WHERE constraint_name = 'tokens_owner_id_fkey') THEN
+    ALTER TABLE public.tokens
+      ADD CONSTRAINT tokens_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.users(id) ON DELETE SET NULL;
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints 
+                 WHERE constraint_name = 'tokens_controlled_by_character_id_fkey') THEN
+    ALTER TABLE public.tokens
+      ADD CONSTRAINT tokens_controlled_by_character_id_fkey FOREIGN KEY (controlled_by_character_id) REFERENCES public.characters(id) ON DELETE SET NULL;
+  END IF;
+END $$;
 
--- Update RLS policies for tokens
-DROP POLICY IF EXISTS "Participants can view tokens." ON public.tokens;
-CREATE POLICY "Session participants can view tokens." ON public.tokens
+-- Update RLS policies for token ownership
+DROP POLICY IF EXISTS "Users can view tokens in their sessions" ON public.tokens;
+DROP POLICY IF EXISTS "Users can manage tokens in their sessions" ON public.tokens;
+
+CREATE POLICY "Users can view tokens in accessible sessions" ON public.tokens
   FOR SELECT USING (
-    session_id IS NULL OR
-    EXISTS (
-      SELECT 1 FROM public.sessions s
-      WHERE s.id = tokens.session_id AND EXISTS (
-        SELECT 1 FROM jsonb_array_elements(s.participants) p WHERE (p->>'userId') = (auth.jwt()->>'sub')
-      )
-    ) OR
-    EXISTS (
-      SELECT 1 FROM public.campaigns c
-      WHERE c.id = tokens.campaign_id AND (
-        c.owner_id = (auth.jwt()->>'sub') OR
-        EXISTS (SELECT 1 FROM public.campaign_members cm WHERE cm.campaign_id = c.id AND cm.user_id = (auth.jwt()->>'sub'))
+    session_id IN (
+      SELECT id FROM public.sessions s
+      WHERE s.participants ? (auth.jwt() ->> 'sub')
+      OR s.campaign_id IN (
+        SELECT campaign_id FROM public.campaign_members 
+        WHERE user_id = auth.jwt() ->> 'sub'
       )
     )
   );
 
-CREATE POLICY "Token owners and DMs can manage tokens." ON public.tokens
+CREATE POLICY "Users can manage their own tokens" ON public.tokens
   FOR ALL USING (
-    owner_id = (auth.jwt()->>'sub') OR
-    EXISTS (
-      SELECT 1 FROM public.sessions s
-      WHERE s.id = tokens.session_id AND EXISTS (
-        SELECT 1 FROM jsonb_array_elements(s.participants) p 
-        WHERE (p->>'userId') = (auth.jwt()->>'sub') AND p->>'role' = 'DM'
+    owner_id = auth.jwt() ->> 'sub' OR
+    session_id IN (
+      SELECT id FROM public.sessions s
+      WHERE s.campaign_id IN (
+        SELECT id FROM public.campaigns 
+        WHERE owner_id = auth.jwt() ->> 'sub'
       )
-    ) OR
-    EXISTS (
-      SELECT 1 FROM public.campaigns c
-      WHERE c.id = tokens.campaign_id AND c.owner_id = (auth.jwt()->>'sub')
-    )
-  ) WITH CHECK (
-    owner_id = (auth.jwt()->>'sub') OR
-    EXISTS (
-      SELECT 1 FROM public.sessions s
-      WHERE s.id = tokens.session_id AND EXISTS (
-        SELECT 1 FROM jsonb_array_elements(s.participants) p 
-        WHERE (p->>'userId') = (auth.jwt()->>'sub') AND p->>'role' = 'DM'
-      )
-    ) OR
-    EXISTS (
-      SELECT 1 FROM public.campaigns c
-      WHERE c.id = tokens.campaign_id AND c.owner_id = (auth.jwt()->>'sub')
     )
   );

@@ -1,49 +1,37 @@
-# Tabletop RPG Collaboration App
+# RPG Collaboration Platform
 
-Real-time collaborative RPG app with Supabase Realtime, Clerk authentication, and AI-powered generators.
+A real-time tabletop RPG collaboration platform built with Next.js, Supabase, and Clerk.
 
-## What's New - Iteration 1: Invite Flow & Campaign Membership
+## Features
 
-### Features Added
-- **Campaign Membership System**: New `campaign_members` table for explicit membership tracking
-- **Character System**: Full character creation and management with per-character gold
-- **Token Ownership**: Tokens now have owners and permission-based movement
-- **Improved Invite Flow**: Bulletproof invite system with proper error handling and realtime updates
+- **Campaign Management**: Create and manage RPG campaigns
+- **Player Invites**: Invite players to join campaigns with proper membership tracking
+- **Character System**: Create and manage characters with stats, inventory, and gold
+- **Interactive Maps**: Drag-and-drop token system with ownership permissions
+- **Shop System**: DM-controlled shops with purchase transactions
+- **Real-time Updates**: Live synchronization across all connected clients
 
-### Database Changes
-- Added `campaign_members` table with RLS policies
-- Added `characters` and `character_inventories` tables
-- Enhanced `tokens` table with ownership and position tracking
-- Added `session_participants` normalized table
-- Added unique constraints for data integrity
+## Tech Stack
 
-### API Endpoints Added
-- `POST /api/campaigns/:campaignId/invite` - Invite users to campaigns
-- `GET /api/campaigns/:campaignId/members` - List campaign members
+- **Frontend**: Next.js 15 (App Router), React, Tailwind CSS, shadcn/ui
+- **Backend**: Next.js API Routes, Supabase (PostgreSQL + Realtime)
+- **Authentication**: Clerk
+- **Testing**: Vitest, Playwright (E2E)
 
-### Frontend Components Added
-- `InviteUserForm` - Form to invite users with toast notifications
-- `CampaignMembersList` - Display campaign members with roles
-- Campaign settings page with tabbed interface
+## Getting Started
 
-## Setup Steps
+### Prerequisites
 
-### 1. Database Setup
-Run the new migration files in your Supabase SQL Editor:
+- Node.js 18+ 
+- npm or yarn
+- Supabase account
+- Clerk account
 
-\`\`\`sql
--- Run these in order:
-scripts/v14-campaign-members.sql
-scripts/v15-characters.sql  
-scripts/v16-token-ownership.sql
-scripts/v17-session-participants.sql
-scripts/v18-players-gold-unique.sql
-\`\`\`
+### Environment Variables
 
-### 2. Environment Variables
-Ensure these are set in your `.env.local`:
+Create a `.env.local` file with:
 
-\`\`\`bash
+\`\`\`env
 # Supabase
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
@@ -54,128 +42,178 @@ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
 CLERK_SECRET_KEY=your_clerk_secret_key
 NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
 NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=/
+NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=/
 
-# AI (for future iterations)
-OPENAI_API_KEY=your_openai_api_key
-STABILITY_API_KEY=your_stability_api_key
+# Optional: AI/Image Generation
+OPENAI_API_KEY=your_openai_key
+STABILITY_API_KEY=your_stability_key
 \`\`\`
 
-### 3. Install Dependencies & Run
+### Installation
 
-\`\`\`bash
-npm install
-npm run dev
-\`\`\`
+1. **Clone and install dependencies:**
+   \`\`\`bash
+   git clone <repository-url>
+   cd rpg-app
+   npm install
+   \`\`\`
 
-### 4. Seed Test Data (Optional)
+2. **Run database migrations:**
+   \`\`\`bash
+   # Execute each migration file in order in your Supabase SQL editor:
+   # scripts/v14-campaign-members.sql
+   # scripts/v15-characters.sql  
+   # scripts/v16-token-ownership.sql
+   # scripts/v17-session-participants.sql
+   # scripts/v18-players-gold-unique.sql
+   \`\`\`
 
-\`\`\`bash
-npx tsx scripts/seed-test-data.ts
-\`\`\`
+3. **Seed test data (optional):**
+   \`\`\`bash
+   npm run seed-test-data
+   \`\`\`
 
-This creates test users and a campaign for manual testing.
+4. **Start development server:**
+   \`\`\`bash
+   npm run dev
+   \`\`\`
+
+5. **Open [http://localhost:3000](http://localhost:3000)**
 
 ## Testing
 
-### Run Unit Tests
+### Unit Tests
+
+Run API and component unit tests:
 
 \`\`\`bash
+# Run all tests
 npm test
+
+# Run tests in watch mode
+npm run test:watch
+
+# Run tests with coverage
+npm run test:coverage
 \`\`\`
 
-### Manual Testing Checklist
+### Manual Testing - Iteration 1 (Invite Flow)
 
-#### Invite Flow Testing
-1. **Setup**: Use seeded test data or create users manually
-2. **DM Invite Success**: 
-   - Login as DM (dm-user-123)
-   - Go to `/campaigns/test-campaign-123/settings`
-   - Invite player-user-456
-   - Should see green success toast
-   - Check database: `campaign_members` should have new row
-3. **Player Access**: 
-   - Login as invited player
-   - Should see campaign in campaigns list
-   - Should be able to access campaign pages
-4. **Duplicate Invite**: 
-   - Try inviting same user again
-   - Should see "Already a member" message
-5. **Error Cases**:
-   - Try inviting non-existent user → should see error toast
-   - Try inviting as non-DM → should see permission error
+#### Prerequisites
+1. Run database migrations
+2. Seed test data: `npm run seed-test-data`
+3. Start dev server: `npm run dev`
 
-#### Database Integrity Testing
-1. Check `campaign_members` table has proper foreign key constraints
-2. Verify RLS policies prevent unauthorized access
-3. Test that `players_gold` rows are created automatically on invite
+#### Test Cases
 
-### Edge Cases Discovered
+**✅ Successful Invite Flow:**
+1. Sign in as DM (dm-user-123)
+2. Navigate to `/campaigns/test-campaign-123/settings`
+3. Go to "Invite Players" tab
+4. Enter user ID: `player-456`
+5. Click "Send Invite"
+6. **Expected**: Green success toast, user added to members list
+7. Check "Members" tab - should show Test Player 1
 
-1. **Concurrent Invites**: Multiple DMs inviting same user simultaneously could cause race conditions
-   - **Mitigation**: Using `ON CONFLICT DO NOTHING` with proper error handling
+**✅ Duplicate Invite Handling:**
+1. Try inviting `player-456` again
+2. **Expected**: "Already a member" toast (not an error)
 
-2. **Orphaned Sessions**: If campaign is deleted, session participants might remain
-   - **Mitigation**: CASCADE deletes in foreign key constraints
+**✅ Non-existent User:**
+1. Try inviting `fake-user-999`
+2. **Expected**: Red error toast "User not found"
 
-3. **Permission Edge Case**: User could be campaign member but not session participant
-   - **Mitigation**: Invite flow now adds to both tables
+**✅ Permission Validation:**
+1. Sign out and sign in as `player-456`
+2. Try accessing `/campaigns/test-campaign-123/settings`
+3. **Expected**: Access denied or redirect
 
-4. **Realtime Event Delivery**: Events might not reach all clients if connection drops
-   - **Mitigation**: Client-side refresh mechanisms and optimistic updates
+**✅ Database Verification:**
+Check Supabase tables after successful invite:
+- `campaign_members`: New row for player-456
+- `players_gold`: Row exists for player-456 + campaign
+- `session_participants`: Player added to active sessions
 
-## API Testing with curl
+### Edge Cases Discovered & Mitigated
 
-### Test Invite Endpoint
+1. **Concurrent Invites**: Using `ON CONFLICT DO NOTHING` prevents duplicate key errors
+2. **Orphaned Data**: CASCADE foreign keys clean up related data
+3. **Permission Edge Cases**: Dual validation (campaign owner + member role)
+4. **Realtime Failures**: Non-blocking realtime events don't fail the request
+5. **Legacy Compatibility**: Updates both normalized tables and JSONB fields
+
+### API Testing with curl
 
 \`\`\`bash
-# Success case (replace with real auth token)
+# Test invite endpoint (replace with actual auth token)
 curl -X POST http://localhost:3000/api/campaigns/test-campaign-123/invite \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_CLERK_TOKEN" \
-  -d '{"inviteeId": "player-user-456"}'
+  -d '{"inviteeId": "player-789"}'
 
-# Expected response:
-# {"ok": true, "member": {...}, "already_member": false}
-\`\`\`
-
-### Test Members Endpoint
-
-\`\`\`bash
-curl -X GET http://localhost:3000/api/campaigns/test-campaign-123/members \
+# Test members endpoint  
+curl http://localhost:3000/api/campaigns/test-campaign-123/members \
   -H "Authorization: Bearer YOUR_CLERK_TOKEN"
-
-# Expected response:
-# {"members": [{"id": "...", "user_id": "...", "role": "Player", ...}]}
 \`\`\`
 
-## Next Steps (Iteration 2)
+## Database Schema
 
-- Character creation and management UI
-- Token spawning and ownership system  
-- Draggable canvas map with permission enforcement
-- Realtime token movement synchronization
+### New Tables (Iteration 1)
 
-## Troubleshooting
+- **campaign_members**: Explicit campaign membership with roles
+- **characters**: Player characters with stats, HP, gold, and inventory
+- **character_inventories**: Per-character item storage
+- **session_participants**: Normalized session membership
+- **Enhanced tokens**: Added ownership and position tracking
 
-### Common Issues
+### Key Relationships
 
-1. **"User not found" errors**: Ensure test users exist in `users` table
-2. **Permission denied**: Check RLS policies and user authentication
-3. **Realtime not working**: Verify Supabase realtime is enabled for tables
-4. **Tests failing**: Run `npm run test:setup` to ensure test environment is configured
+\`\`\`
+campaigns (1) -> (*) campaign_members -> (*) users
+campaigns (1) -> (*) characters -> (*) character_inventories  
+characters (1) -> (*) tokens (controlled_by_character_id)
+sessions (1) -> (*) session_participants -> (*) users
+sessions (1) -> (*) tokens
+\`\`\`
 
-### Debug Mode
+## Security Model
 
-Set `DEBUG=true` in environment to enable detailed API logging.
+- **Authentication**: Clerk handles user auth and session management
+- **Authorization**: Row Level Security (RLS) policies on all tables
+- **Campaign Access**: Only owners and members can access campaign data
+- **Token Ownership**: Players can only move their own tokens (DMs can move any)
+- **Shop Permissions**: Only DMs can toggle shop visibility and grant gold
 
----
+## Realtime Events
 
-## Previous Features
+### Channels
+- `campaign:{campaignId}` - Campaign-level events (member added, shop toggled)
+- `session:{sessionId}` - Session events (token moved, battle started)
+- `user:{userId}` - User-specific events (gold granted)
 
-- Canvas map with full-height center canvas and smooth pan/zoom
-- Circular tokens with soft borders (red for enemies, blue for players)
-- DM Tools in hover tab with battle generation
-- Battles switcher dropdown with activity log loading
-- Chat UX with timestamps and user alignment
-- Stability AI integration for map generation
-- Database with comprehensive RLS policies
+### Event Types
+- `CAMPAIGN_MEMBER_ADDED` - New player joined campaign
+- `TOKEN_MOVED` - Token position updated
+- `SHOP_PURCHASE` - Item purchased from shop
+- `GOLD_UPDATED` - Player gold balance changed
+
+## Next Steps - Iteration 2
+
+- [ ] Character creation and management UI
+- [ ] Token spawning from characters  
+- [ ] Draggable canvas map with Fabric.js
+- [ ] Token ownership and movement permissions
+- [ ] Real-time token synchronization
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make changes with tests
+4. Run the test suite
+5. Submit a pull request
+
+## License
+
+MIT License - see LICENSE file for details

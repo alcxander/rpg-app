@@ -1,29 +1,36 @@
-import { createClient } from "@supabase/supabase-js"
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
-
-const supabase = createClient(supabaseUrl, supabaseKey)
+import { createAdminClient } from "../lib/supabaseAdmin"
 
 async function seedTestData() {
+  const supabase = createAdminClient()
+
   console.log("🌱 Seeding test data...")
 
   try {
     // Create test users
     const testUsers = [
-      { id: "dm-user-123", clerk_id: "user_dm123", name: "Test DM" },
-      { id: "player-user-456", clerk_id: "user_player456", name: "Test Player 1" },
-      { id: "player-user-789", clerk_id: "user_player789", name: "Test Player 2" },
+      {
+        id: "dm-user-123",
+        name: "Test DM",
+        email: "dm@test.com",
+        image_url: null,
+      },
+      {
+        id: "player-456",
+        name: "Test Player 1",
+        email: "player1@test.com",
+        image_url: null,
+      },
+      {
+        id: "player-789",
+        name: "Test Player 2",
+        email: "player2@test.com",
+        image_url: null,
+      },
     ]
 
+    console.log("Creating test users...")
     for (const user of testUsers) {
-      const { error } = await supabase.from("users").upsert(user, { onConflict: "id" })
-
-      if (error) {
-        console.error(`Error creating user ${user.name}:`, error)
-      } else {
-        console.log(`✅ Created user: ${user.name}`)
-      }
+      await supabase.from("users").upsert(user, { onConflict: "id" })
     }
 
     // Create test campaign
@@ -34,7 +41,7 @@ async function seedTestData() {
           id: "test-campaign-123",
           name: "Test Campaign",
           owner_id: "dm-user-123",
-          settings: {},
+          access_enabled: true,
         },
         { onConflict: "id" },
       )
@@ -46,18 +53,21 @@ async function seedTestData() {
       return
     }
 
-    console.log("✅ Created test campaign")
+    console.log("✅ Created test campaign:", campaign?.name)
 
     // Create test session
-    const { error: sessionError } = await supabase.from("sessions").upsert(
-      {
-        id: "test-session-123",
-        campaign_id: "test-campaign-123",
-        active: true,
-        participants: [{ userId: "dm-user-123", role: "DM" }],
-      },
-      { onConflict: "id" },
-    )
+    const { data: session, error: sessionError } = await supabase
+      .from("sessions")
+      .upsert(
+        {
+          id: "test-session-123",
+          campaign_id: "test-campaign-123",
+          participants: ["dm-user-123"],
+        },
+        { onConflict: "id" },
+      )
+      .select()
+      .single()
 
     if (sessionError) {
       console.error("Error creating session:", sessionError)
@@ -67,7 +77,7 @@ async function seedTestData() {
     console.log("✅ Created test session")
 
     // Add DM as campaign member
-    const { error: memberError } = await supabase.from("campaign_members").upsert(
+    await supabase.from("campaign_members").upsert(
       {
         campaign_id: "test-campaign-123",
         user_id: "dm-user-123",
@@ -76,19 +86,29 @@ async function seedTestData() {
       { onConflict: "campaign_id,user_id" },
     )
 
-    if (memberError) {
-      console.error("Error adding DM as member:", memberError)
-      return
+    console.log("✅ Added DM to campaign")
+
+    // Initialize gold for all users
+    for (const user of testUsers) {
+      await supabase.from("players_gold").upsert(
+        {
+          player_id: user.id,
+          campaign_id: "test-campaign-123",
+          gold: user.id === "dm-user-123" ? 1000 : 100,
+        },
+        { onConflict: "player_id,campaign_id" },
+      )
     }
 
-    console.log("✅ Added DM as campaign member")
+    console.log("✅ Initialized player gold")
 
-    console.log("🎉 Test data seeded successfully!")
-    console.log("\nTest credentials:")
-    console.log("DM User ID: dm-user-123")
-    console.log("Player User IDs: player-user-456, player-user-789")
-    console.log("Campaign ID: test-campaign-123")
-    console.log("Session ID: test-session-123")
+    console.log("\n🎉 Test data seeded successfully!")
+    console.log("\nTest accounts:")
+    console.log("- DM: dm-user-123 (Test DM)")
+    console.log("- Player 1: player-456 (Test Player 1)")
+    console.log("- Player 2: player-789 (Test Player 2)")
+    console.log("\nTest campaign: test-campaign-123")
+    console.log("Test session: test-session-123")
   } catch (error) {
     console.error("❌ Error seeding test data:", error)
   }

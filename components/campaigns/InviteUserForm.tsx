@@ -8,11 +8,11 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useToast } from "@/hooks/use-toast"
-import { Loader2, UserPlus } from "lucide-react"
+import { UserPlus, Loader2 } from "lucide-react"
 
 interface InviteUserFormProps {
   campaignId: string
-  onInviteSuccess?: (member: any) => void
+  onInviteSuccess?: () => void
 }
 
 export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormProps) {
@@ -40,7 +40,9 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ inviteeId: inviteeId.trim() }),
+        body: JSON.stringify({
+          inviteeId: inviteeId.trim(),
+        }),
       })
 
       const data = await response.json()
@@ -58,10 +60,10 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
       } else {
         toast({
           title: "Success!",
-          description: "Player has been invited to the campaign",
+          description: `User ${data.member?.user?.name || inviteeId} has been invited to the campaign`,
           variant: "default",
         })
-        onInviteSuccess?.(data.member)
+        onInviteSuccess?.()
       }
 
       setInviteeId("")

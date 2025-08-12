@@ -1,9 +1,8 @@
--- 005_sessions_participants.sql
-CREATE TABLE public.session_participants (
+-- 018_sessions_participants.sql
+CREATE TABLE IF NOT EXISTS public.session_participants (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   session_id text NOT NULL,
   user_id text NOT NULL,
-  role text NOT NULL DEFAULT 'Player', -- 'DM' or 'Player'
   joined_at timestamptz DEFAULT now(),
   CONSTRAINT session_participants_pkey PRIMARY KEY (id),
   CONSTRAINT session_participants_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.sessions(id) ON DELETE CASCADE,
@@ -14,37 +13,24 @@ CREATE TABLE public.session_participants (
 -- Enable RLS
 ALTER TABLE public.session_participants ENABLE ROW LEVEL SECURITY;
 
--- RLS Policies
-CREATE POLICY "Session participants can view session membership." ON public.session_participants
+-- Policy: Users can see participants for sessions they're in
+CREATE POLICY "Users can view session participants" ON public.session_participants
   FOR SELECT USING (
-    user_id = (auth.jwt()->>'sub') OR
-    EXISTS (
-      SELECT 1 FROM public.sessions s
-      WHERE s.id = session_participants.session_id AND EXISTS (
-        SELECT 1 FROM jsonb_array_elements(s.participants) p 
-        WHERE (p->>'userId') = (auth.jwt()->>'sub') AND p->>'role' = 'DM'
-      )
+    user_id = auth.jwt() ->> 'sub' OR
+    session_id IN (
+      SELECT session_id FROM public.session_participants 
+      WHERE user_id = auth.jwt() ->> 'sub'
     )
   );
 
-CREATE POLICY "DMs can manage session participants." ON public.session_participants
+-- Policy: Campaign owners can manage session participants
+CREATE POLICY "Campaign owners can manage session participants" ON public.session_participants
   FOR ALL USING (
-    EXISTS (
-      SELECT 1 FROM public.sessions s
-      WHERE s.id = session_participants.session_id AND EXISTS (
-        SELECT 1 FROM jsonb_array_elements(s.participants) p 
-        WHERE (p->>'userId') = (auth.jwt()->>'sub') AND p->>'role' = 'DM'
-      )
-    )
-  ) WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM public.sessions s
-      WHERE s.id = session_participants.session_id AND EXISTS (
-        SELECT 1 FROM jsonb_array_elements(s.participants) p 
-        WHERE (p->>'userId') = (auth.jwt()->>'sub') AND p->>'role' = 'DM'
+    session_id IN (
+      SELECT id FROM public.sessions s
+      WHERE s.campaign_id IN (
+        SELECT id FROM public.campaigns 
+        WHERE owner_id = auth.jwt() ->> 'sub'
       )
     )
   );
-
--- Add to realtime
-ALTER PUBLICATION supabase_realtime ADD TABLE public.session_participants;

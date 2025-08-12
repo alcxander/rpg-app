@@ -1,10 +1,10 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Users, Crown, Shield } from "lucide-react"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Users, Crown, User, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 interface CampaignMember {
@@ -14,8 +14,9 @@ interface CampaignMember {
   joined_at: string
   users: {
     id: string
-    name: string
-    clerk_id: string
+    name: string | null
+    email: string | null
+    image_url: string | null
   }
 }
 
@@ -24,13 +25,14 @@ interface CampaignMembersListProps {
   refreshTrigger?: number
 }
 
-export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMembersListProps) {
+export function CampaignMembersList({ campaignId, refreshTrigger = 0 }: CampaignMembersListProps) {
   const [members, setMembers] = useState<CampaignMember[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const { toast } = useToast()
 
   const fetchMembers = async () => {
     try {
+      setIsLoading(true)
       const response = await fetch(`/api/campaigns/${campaignId}/members`)
 
       if (!response.ok) {
@@ -55,41 +57,26 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
     fetchMembers()
   }, [campaignId, refreshTrigger])
 
-  const getRoleIcon = (role: string) => {
-    switch (role) {
-      case "DM":
-        return <Crown className="h-4 w-4" />
-      case "Player":
-        return <Shield className="h-4 w-4" />
-      default:
-        return <Users className="h-4 w-4" />
-    }
+  const getInitials = (name: string | null) => {
+    if (!name) return "?"
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2)
   }
 
-  const getRoleColor = (role: string) => {
-    switch (role) {
-      case "DM":
-        return "bg-yellow-100 text-yellow-800 border-yellow-200"
-      case "Player":
-        return "bg-blue-100 text-blue-800 border-blue-200"
-      default:
-        return "bg-gray-100 text-gray-800 border-gray-200"
-    }
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString()
   }
 
   if (isLoading) {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Users className="h-5 w-5" />
-            Campaign Members
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-          </div>
+        <CardContent className="flex items-center justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin" />
+          <span className="ml-2">Loading members...</span>
         </CardContent>
       </Card>
     )
@@ -100,39 +87,51 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Users className="h-5 w-5" />
-          Campaign Members
+          Campaign Members ({members.length})
         </CardTitle>
-        <CardDescription>
-          {members.length} member{members.length !== 1 ? "s" : ""} in this campaign
-        </CardDescription>
+        <CardDescription>Players and dungeon masters in this campaign</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="space-y-3">
-          {members.map((member) => (
-            <div key={member.id} className="flex items-center justify-between p-3 rounded-lg border bg-card">
-              <div className="flex items-center gap-3">
-                <Avatar className="h-8 w-8">
-                  <AvatarFallback>{member.users.name.charAt(0).toUpperCase()}</AvatarFallback>
-                </Avatar>
-                <div>
-                  <p className="font-medium">{member.users.name}</p>
-                  <p className="text-sm text-muted-foreground">
-                    Joined {new Date(member.joined_at).toLocaleDateString()}
-                  </p>
+        {members.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+            <p>No members yet</p>
+            <p className="text-sm">Invite players to get started</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {members.map((member) => (
+              <div key={member.id} className="flex items-center justify-between p-3 border rounded-lg">
+                <div className="flex items-center gap-3">
+                  <Avatar className="h-10 w-10">
+                    <AvatarImage src={member.users.image_url || undefined} />
+                    <AvatarFallback>{getInitials(member.users.name)}</AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <div className="font-medium">{member.users.name || "Unknown User"}</div>
+                    <div className="text-sm text-muted-foreground">{member.users.email}</div>
+                    <div className="text-xs text-muted-foreground">Joined {formatDate(member.joined_at)}</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={member.role === "DM" ? "default" : "secondary"}>
+                    {member.role === "DM" ? (
+                      <>
+                        <Crown className="h-3 w-3 mr-1" />
+                        DM
+                      </>
+                    ) : (
+                      <>
+                        <User className="h-3 w-3 mr-1" />
+                        Player
+                      </>
+                    )}
+                  </Badge>
                 </div>
               </div>
-              <Badge variant="outline" className={`flex items-center gap-1 ${getRoleColor(member.role)}`}>
-                {getRoleIcon(member.role)}
-                {member.role}
-              </Badge>
-            </div>
-          ))}
-          {members.length === 0 && (
-            <div className="text-center py-8 text-muted-foreground">
-              No members yet. Invite some players to get started!
-            </div>
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   )

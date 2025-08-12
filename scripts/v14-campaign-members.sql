@@ -1,5 +1,5 @@
--- 001_create_campaign_members.sql
-CREATE TABLE public.campaign_members (
+-- 014_create_campaign_members.sql
+CREATE TABLE IF NOT EXISTS public.campaign_members (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   campaign_id uuid NOT NULL,
   user_id text NOT NULL,
@@ -15,19 +15,21 @@ CREATE TABLE public.campaign_members (
 -- Enable RLS
 ALTER TABLE public.campaign_members ENABLE ROW LEVEL SECURITY;
 
--- RLS Policies
-CREATE POLICY "Campaign members can view their own membership." ON public.campaign_members
+-- Policy: Users can see campaign members for campaigns they belong to
+CREATE POLICY "Users can view campaign members for their campaigns" ON public.campaign_members
   FOR SELECT USING (
-    user_id = (auth.jwt()->>'sub') OR
-    EXISTS (SELECT 1 FROM public.campaigns c WHERE c.id = campaign_members.campaign_id AND c.owner_id = (auth.jwt()->>'sub'))
+    user_id = auth.jwt() ->> 'sub' OR
+    campaign_id IN (
+      SELECT campaign_id FROM public.campaign_members 
+      WHERE user_id = auth.jwt() ->> 'sub'
+    )
   );
 
-CREATE POLICY "Campaign owners can manage members." ON public.campaign_members
+-- Policy: Campaign owners can manage members
+CREATE POLICY "Campaign owners can manage members" ON public.campaign_members
   FOR ALL USING (
-    EXISTS (SELECT 1 FROM public.campaigns c WHERE c.id = campaign_members.campaign_id AND c.owner_id = (auth.jwt()->>'sub'))
-  ) WITH CHECK (
-    EXISTS (SELECT 1 FROM public.campaigns c WHERE c.id = campaign_members.campaign_id AND c.owner_id = (auth.jwt()->>'sub'))
+    campaign_id IN (
+      SELECT id FROM public.campaigns 
+      WHERE owner_id = auth.jwt() ->> 'sub'
+    )
   );
-
--- Add to realtime
-ALTER PUBLICATION supabase_realtime ADD TABLE public.campaign_members;

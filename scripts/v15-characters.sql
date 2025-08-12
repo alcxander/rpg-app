@@ -1,5 +1,5 @@
--- 002_create_characters.sql
-CREATE TABLE public.characters (
+-- 015_create_characters.sql
+CREATE TABLE IF NOT EXISTS public.characters (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id text NOT NULL,
   campaign_id uuid, -- optional; character can be global or campaign-specific
@@ -21,8 +21,8 @@ CREATE TABLE public.characters (
   CONSTRAINT characters_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES public.campaigns(id) ON DELETE SET NULL
 );
 
--- 003_character_inventory.sql
-CREATE TABLE public.character_inventories (
+-- 016_character_inventory.sql
+CREATE TABLE IF NOT EXISTS public.character_inventories (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   character_id uuid NOT NULL,
   item_name text NOT NULL,
@@ -37,37 +37,35 @@ CREATE TABLE public.character_inventories (
 ALTER TABLE public.characters ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.character_inventories ENABLE ROW LEVEL SECURITY;
 
--- RLS Policies for characters
-CREATE POLICY "Users can view their own characters." ON public.characters
+-- Characters policies
+CREATE POLICY "Users can view their own characters" ON public.characters
+  FOR SELECT USING (user_id = auth.jwt() ->> 'sub');
+
+CREATE POLICY "Users can manage their own characters" ON public.characters
+  FOR ALL USING (user_id = auth.jwt() ->> 'sub');
+
+-- Campaign members can view characters in their campaigns
+CREATE POLICY "Campaign members can view campaign characters" ON public.characters
   FOR SELECT USING (
-    user_id = (auth.jwt()->>'sub') OR
-    EXISTS (SELECT 1 FROM public.campaigns c WHERE c.id = characters.campaign_id AND c.owner_id = (auth.jwt()->>'sub')) OR
-    EXISTS (SELECT 1 FROM public.campaign_members cm WHERE cm.campaign_id = characters.campaign_id AND cm.user_id = (auth.jwt()->>'sub'))
+    campaign_id IN (
+      SELECT campaign_id FROM public.campaign_members 
+      WHERE user_id = auth.jwt() ->> 'sub'
+    )
   );
 
-CREATE POLICY "Users can manage their own characters." ON public.characters
-  FOR ALL USING (user_id = (auth.jwt()->>'sub')) WITH CHECK (user_id = (auth.jwt()->>'sub'));
-
--- RLS Policies for character inventories
-CREATE POLICY "Users can view inventories of accessible characters." ON public.character_inventories
+-- Character inventory policies
+CREATE POLICY "Users can view their character inventories" ON public.character_inventories
   FOR SELECT USING (
-    EXISTS (SELECT 1 FROM public.characters c WHERE c.id = character_inventories.character_id AND (
-      c.user_id = (auth.jwt()->>'sub') OR
-      EXISTS (SELECT 1 FROM public.campaigns camp WHERE camp.id = c.campaign_id AND camp.owner_id = (auth.jwt()->>'sub'))
-    ))
+    character_id IN (
+      SELECT id FROM public.characters 
+      WHERE user_id = auth.jwt() ->> 'sub'
+    )
   );
 
-CREATE POLICY "Users can manage inventories of their characters." ON public.character_inventories
+CREATE POLICY "Users can manage their character inventories" ON public.character_inventories
   FOR ALL USING (
-    EXISTS (SELECT 1 FROM public.characters c WHERE c.id = character_inventories.character_id AND c.user_id = (auth.jwt()->>'sub'))
-  ) WITH CHECK (
-    EXISTS (SELECT 1 FROM public.characters c WHERE c.id = character_inventories.character_id AND c.user_id = (auth.jwt()->>'sub'))
+    character_id IN (
+      SELECT id FROM public.characters 
+      WHERE user_id = auth.jwt() ->> 'sub'
+    )
   );
-
--- Add to realtime
-ALTER PUBLICATION supabase_realtime ADD TABLE public.characters;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.character_inventories;
-
--- Update trigger for characters
-CREATE TRIGGER characters_updated_at_trigger BEFORE UPDATE ON public.characters
-FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

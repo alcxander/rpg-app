@@ -6,9 +6,10 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { UserPlus, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { Loader2, UserPlus } from "lucide-react"
 
 interface InviteUserFormProps {
   campaignId: string
@@ -16,14 +17,15 @@ interface InviteUserFormProps {
 }
 
 export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormProps) {
-  const [inviteeId, setInviteeId] = useState("")
+  const [userId, setUserId] = useState("")
+  const [role, setRole] = useState("Player")
   const [isLoading, setIsLoading] = useState(false)
   const { toast } = useToast()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!inviteeId.trim()) {
+    if (!userId.trim()) {
       toast({
         title: "Error",
         description: "Please enter a user ID",
@@ -41,7 +43,8 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          inviteeId: inviteeId.trim(),
+          inviteUserId: userId.trim(),
+          role,
         }),
       })
 
@@ -51,21 +54,17 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
         throw new Error(data.error || "Failed to invite user")
       }
 
-      if (data.already_member) {
-        toast({
-          title: "Already a member",
-          description: "This user is already a member of the campaign",
-          variant: "default",
-        })
-      } else {
-        toast({
-          title: "Success!",
-          description: data.message || "User successfully invited to campaign",
-          variant: "default",
-        })
-        setInviteeId("")
-        onInviteSuccess?.()
-      }
+      toast({
+        title: "Success",
+        description: `User successfully invited as ${role}`,
+      })
+
+      // Reset form
+      setUserId("")
+      setRole("Player")
+
+      // Notify parent component
+      onInviteSuccess?.()
     } catch (error) {
       console.error("Invite error:", error)
       toast({
@@ -85,26 +84,37 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
           <UserPlus className="h-5 w-5" />
           Invite Player
         </CardTitle>
-        <CardDescription>Add a new player to this campaign by entering their user ID.</CardDescription>
+        <CardDescription>Add a new player to your campaign by entering their user ID</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="inviteeId">User ID</Label>
+            <Label htmlFor="userId">User ID</Label>
             <Input
-              id="inviteeId"
+              id="userId"
               type="text"
-              placeholder="Enter user ID (e.g., user_abc123)"
-              value={inviteeId}
-              onChange={(e) => setInviteeId(e.target.value)}
+              placeholder="user_2ABC123DEF456GHI789"
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
               disabled={isLoading}
-              className="w-full"
             />
-            <p className="text-sm text-muted-foreground">
-              The user ID can be found in the user's profile or account settings.
-            </p>
+            <p className="text-sm text-muted-foreground">Enter the Clerk user ID (starts with "user_")</p>
           </div>
-          <Button type="submit" disabled={isLoading || !inviteeId.trim()} className="w-full">
+
+          <div className="space-y-2">
+            <Label htmlFor="role">Role</Label>
+            <Select value={role} onValueChange={setRole} disabled={isLoading}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a role" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Player">Player</SelectItem>
+                <SelectItem value="DM">Dungeon Master</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Button type="submit" disabled={isLoading} className="w-full">
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />

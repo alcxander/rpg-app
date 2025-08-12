@@ -4,6 +4,7 @@ import { useState, use } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { InviteUserForm } from "@/components/campaigns/InviteUserForm"
 import { CampaignMembersList } from "@/components/campaigns/CampaignMembersList"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Settings, Users, UserPlus } from "lucide-react"
 
 interface CampaignSettingsPageProps {
@@ -45,8 +46,31 @@ export default function CampaignSettingsPage({ params }: CampaignSettingsPagePro
           <CampaignMembersList campaignId={campaignId} refreshTrigger={refreshTrigger} />
         </TabsContent>
 
-        <TabsContent value="invite" className="mt-6">
+        <TabsContent value="invite" className="mt-6 space-y-6">
           <InviteUserForm campaignId={campaignId} onInviteSuccess={handleInviteSuccess} />
+
+          <Card>
+            <CardHeader>
+              <CardTitle>How to Find User IDs</CardTitle>
+              <CardDescription>Instructions for finding user IDs to invite players</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <h4 className="font-medium mb-2">For Clerk Authentication:</h4>
+                <ol className="list-decimal list-inside space-y-1 text-sm text-muted-foreground">
+                  <li>Go to your Clerk Dashboard</li>
+                  <li>Navigate to Users section</li>
+                  <li>Find the user you want to invite</li>
+                  <li>Copy their User ID (starts with "user_")</li>
+                </ol>
+              </div>
+
+              <div>
+                <h4 className="font-medium mb-2">User ID Format:</h4>
+                <code className="text-xs bg-muted px-2 py-1 rounded">user_2ABC123DEF456GHI789</code>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>

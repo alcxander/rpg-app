@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { name, description } = body
+    const { name } = body
 
     if (!name) {
       console.log("[api/campaigns] POST missing name", { reqId })
@@ -107,7 +107,6 @@ export async function POST(request: NextRequest) {
       .from("campaigns")
       .insert({
         name,
-        description: description || "",
         owner_id: userId,
         settings: {
           players: [],

@@ -1,11 +1,9 @@
--- Migration: Add normalized session_participants table
--- This provides better querying and syncing for session membership
-
+-- Migration: Add normalized session participants table
 CREATE TABLE IF NOT EXISTS public.session_participants (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   session_id text NOT NULL,
   user_id text NOT NULL,
-  role text DEFAULT 'Player',
+  role text DEFAULT 'Player', -- 'DM' or 'Player'
   joined_at timestamptz DEFAULT now(),
   CONSTRAINT session_participants_pkey PRIMARY KEY (id),
   CONSTRAINT session_participants_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.sessions(id) ON DELETE CASCADE,
@@ -22,20 +20,15 @@ CREATE POLICY "Users can view session participants for sessions they're in" ON p
     user_id = auth.uid() OR
     session_id IN (
       SELECT session_id FROM public.session_participants WHERE user_id = auth.uid()
-    ) OR
-    session_id IN (
-      SELECT id FROM public.sessions WHERE campaign_id IN (
-        SELECT id FROM public.campaigns WHERE owner_id = auth.uid()
-      )
     )
   );
 
-CREATE POLICY "Campaign owners can manage session participants" ON public.session_participants
+CREATE POLICY "Session owners can manage participants" ON public.session_participants
   FOR ALL USING (
     session_id IN (
-      SELECT id FROM public.sessions WHERE campaign_id IN (
-        SELECT id FROM public.campaigns WHERE owner_id = auth.uid()
-      )
+      SELECT s.id FROM public.sessions s
+      JOIN public.campaigns c ON s.campaign_id = c.id
+      WHERE c.owner_id = auth.uid()
     )
   );
 

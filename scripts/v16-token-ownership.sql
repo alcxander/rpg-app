@@ -1,74 +1,46 @@
 -- Migration: Add token ownership and control columns
--- This enables per-token ownership and movement permissions
-
-ALTER TABLE public.tokens
-  ADD COLUMN IF NOT EXISTS owner_id text NULL,   -- user id who controls it (nullable)
-  ADD COLUMN IF NOT EXISTS controlled_by_character_id uuid NULL, -- if token represents a character
-  ADD COLUMN IF NOT EXISTS is_locked boolean NOT NULL DEFAULT false,
-  ADD COLUMN IF NOT EXISTS position jsonb DEFAULT '{"x": 0, "y": 0}'::jsonb; -- token position on map
-
--- Add foreign key constraints
+-- First check if columns exist before adding them
 DO $$ 
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.table_constraints 
-    WHERE constraint_name = 'tokens_owner_id_fkey'
-  ) THEN
-    ALTER TABLE public.tokens
-      ADD CONSTRAINT tokens_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.users(id) ON DELETE SET NULL;
-  END IF;
+    -- Add owner_id column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'tokens' AND column_name = 'owner_id') THEN
+        ALTER TABLE public.tokens ADD COLUMN owner_id text NULL;
+    END IF;
+    
+    -- Add controlled_by_character_id column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'tokens' AND column_name = 'controlled_by_character_id') THEN
+        ALTER TABLE public.tokens ADD COLUMN controlled_by_character_id uuid NULL;
+    END IF;
+    
+    -- Add is_locked column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'tokens' AND column_name = 'is_locked') THEN
+        ALTER TABLE public.tokens ADD COLUMN is_locked boolean NOT NULL DEFAULT false;
+    END IF;
 END $$;
 
-DO $$ 
+-- Add foreign key constraints if they don't exist
+DO $$
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.table_constraints 
-    WHERE constraint_name = 'tokens_controlled_by_character_id_fkey'
-  ) THEN
-    ALTER TABLE public.tokens
-      ADD CONSTRAINT tokens_controlled_by_character_id_fkey FOREIGN KEY (controlled_by_character_id) REFERENCES public.characters(id) ON DELETE SET NULL;
-  END IF;
+    -- Add owner_id foreign key constraint
+    IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints 
+                   WHERE constraint_name = 'tokens_owner_id_fkey') THEN
+        ALTER TABLE public.tokens 
+        ADD CONSTRAINT tokens_owner_id_fkey 
+        FOREIGN KEY (owner_id) REFERENCES public.users(id) ON DELETE SET NULL;
+    END IF;
+    
+    -- Add character foreign key constraint
+    IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints 
+                   WHERE constraint_name = 'tokens_controlled_by_character_id_fkey') THEN
+        ALTER TABLE public.tokens 
+        ADD CONSTRAINT tokens_controlled_by_character_id_fkey 
+        FOREIGN KEY (controlled_by_character_id) REFERENCES public.characters(id) ON DELETE SET NULL;
+    END IF;
 END $$;
 
--- Update RLS policies for tokens
-DROP POLICY IF EXISTS "Users can view tokens in sessions they participate in" ON public.tokens;
-DROP POLICY IF EXISTS "Users can update tokens they own" ON public.tokens;
-
-CREATE POLICY "Users can view tokens in sessions they participate in" ON public.tokens
-  FOR SELECT USING (
-    session_id IN (
-      SELECT session_id FROM public.session_participants WHERE user_id = auth.uid()
-    ) OR
-    session_id IN (
-      SELECT id FROM public.sessions WHERE campaign_id IN (
-        SELECT id FROM public.campaigns WHERE owner_id = auth.uid()
-      )
-    )
-  );
-
-CREATE POLICY "Users can update tokens they own" ON public.tokens
-  FOR UPDATE USING (
-    owner_id = auth.uid() OR
-    session_id IN (
-      SELECT id FROM public.sessions WHERE campaign_id IN (
-        SELECT id FROM public.campaigns WHERE owner_id = auth.uid()
-      )
-    )
-  );
-
-CREATE POLICY "Users can insert tokens in sessions they participate in" ON public.tokens
-  FOR INSERT WITH CHECK (
-    session_id IN (
-      SELECT session_id FROM public.session_participants WHERE user_id = auth.uid()
-    ) OR
-    session_id IN (
-      SELECT id FROM public.sessions WHERE campaign_id IN (
-        SELECT id FROM public.campaigns WHERE owner_id = auth.uid()
-      )
-    )
-  );
-
--- Create indexes
+-- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_tokens_owner_id ON public.tokens(owner_id);
-CREATE INDEX IF NOT EXISTS idx_tokens_character_id ON public.tokens(controlled_by_character_id);
-CREATE INDEX IF NOT EXISTS idx_tokens_session_id ON public.tokens(session_id);
+CREATE INDEX IF NOT EXISTS idx_tokens_controlled_by_character_id ON public.tokens(controlled_by_character_id);

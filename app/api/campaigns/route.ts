@@ -10,13 +10,14 @@ function rid() {
 
 /**
  * GET /api/campaigns
- * Returns campaigns owned by the current user.
+ * Fetches campaigns that the user owns or is a member of
  */
 export async function GET(req: NextRequest) {
   const reqId = rid()
+
   try {
-    const { userId, sessionId } = getAuth(req)
-    console.log("[api/campaigns] GET start", { reqId, hasUser: !!userId, sessionId, path: req.nextUrl.pathname })
+    const { userId } = getAuth(req)
+    console.log("[api/campaigns] GET start", { reqId, hasUser: !!userId })
 
     if (!userId) {
       console.warn("[api/campaigns] GET unauthorized", { reqId })
@@ -24,19 +25,53 @@ export async function GET(req: NextRequest) {
     }
 
     const supabase = createAdminClient()
-    const { data, error } = await supabase
+
+    // Fetch campaigns where user is owner OR member
+    const { data: campaigns, error } = await supabase
       .from("campaigns")
-      .select("id,name,owner_id,access_enabled,created_at")
-      .eq("owner_id", userId)
+      .select(`
+        id,
+        name,
+        description,
+        owner_id,
+        settings,
+        created_at,
+        updated_at,
+        campaign_members!inner (
+          role,
+          joined_at
+        )
+      `)
+      .or(`owner_id.eq.${userId},campaign_members.user_id.eq.${userId}`)
       .order("created_at", { ascending: false })
 
     if (error) {
-      console.error("[api/campaigns] GET query error", { reqId, error: error.message })
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+      console.error("[api/campaigns] GET error", { reqId, error: error.message })
+      return NextResponse.json({ error: "Failed to fetch campaigns" }, { status: 500 })
     }
 
-    console.log("[api/campaigns] GET done", { reqId, count: data?.length ?? 0 })
-    return NextResponse.json({ campaigns: data ?? [] })
+    // Transform the data to include user's role
+    const transformedCampaigns =
+      campaigns?.map((campaign) => {
+        const isOwner = campaign.owner_id === userId
+        const memberInfo = campaign.campaign_members?.[0]
+
+        return {
+          id: campaign.id,
+          name: campaign.name,
+          description: campaign.description,
+          owner_id: campaign.owner_id,
+          settings: campaign.settings,
+          created_at: campaign.created_at,
+          updated_at: campaign.updated_at,
+          user_role: isOwner ? "Owner" : memberInfo?.role || "Member",
+          joined_at: isOwner ? campaign.created_at : memberInfo?.joined_at,
+          is_owner: isOwner,
+        }
+      }) || []
+
+    console.log("[api/campaigns] GET success", { reqId, count: transformedCampaigns.length })
+    return NextResponse.json({ campaigns: transformedCampaigns })
   } catch (e: any) {
     console.error("[api/campaigns] GET exception", { reqId, message: e?.message })
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
@@ -45,45 +80,71 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST /api/campaigns
- * Creates a new campaign owned by the current user.
- * Body: { name: string }
+ * Creates a new campaign
  */
 export async function POST(req: NextRequest) {
   const reqId = rid()
+
   try {
-    const { userId, sessionId } = getAuth(req)
-    console.log("[api/campaigns] POST start", { reqId, hasUser: !!userId, sessionId, path: req.nextUrl.pathname })
+    const { userId } = getAuth(req)
+    console.log("[api/campaigns] POST start", { reqId, hasUser: !!userId })
 
     if (!userId) {
       console.warn("[api/campaigns] POST unauthorized", { reqId })
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    let name = ""
+    let body
     try {
-      const body = await req.json()
-      name = String(body?.name || "").trim()
+      body = await req.json()
     } catch {
       return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
     }
-    if (!name) {
-      return NextResponse.json({ error: "name required" }, { status: 400 })
+
+    const { name, description } = body
+
+    if (!name?.trim()) {
+      return NextResponse.json({ error: "Campaign name is required" }, { status: 400 })
     }
 
     const supabase = createAdminClient()
-    const { data, error } = await supabase
+
+    // Create the campaign
+    const { data: campaign, error: campaignError } = await supabase
       .from("campaigns")
-      .insert({ name, owner_id: userId, access_enabled: true })
-      .select("id,name,owner_id,access_enabled,created_at")
+      .insert({
+        name: name.trim(),
+        description: description?.trim() || "",
+        owner_id: userId,
+        settings: {
+          players: [],
+          created_by: userId,
+          created_at: new Date().toISOString(),
+        },
+      })
+      .select()
       .single()
 
-    if (error || !data) {
-      console.error("[api/campaigns] POST insert error", { reqId, error: error?.message || "unknown" })
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    if (campaignError) {
+      console.error("[api/campaigns] POST campaign creation error", { reqId, error: campaignError.message })
+      return NextResponse.json({ error: "Failed to create campaign" }, { status: 500 })
     }
 
-    console.log("[api/campaigns] POST done", { reqId, id: data.id })
-    return NextResponse.json({ campaign: data }, { status: 201 })
+    // Add creator as campaign member with DM role
+    const { error: memberError } = await supabase.from("campaign_members").insert({
+      campaign_id: campaign.id,
+      user_id: userId,
+      role: "DM",
+      added_by: userId,
+    })
+
+    if (memberError) {
+      console.warn("[api/campaigns] POST member creation error", { reqId, error: memberError.message })
+      // Don't fail the campaign creation for this
+    }
+
+    console.log("[api/campaigns] POST success", { reqId, campaignId: campaign.id })
+    return NextResponse.json({ campaign })
   } catch (e: any) {
     console.error("[api/campaigns] POST exception", { reqId, message: e?.message })
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })

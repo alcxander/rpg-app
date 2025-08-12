@@ -1,6 +1,4 @@
--- Migration: Add characters and character_inventories tables
--- This enables per-character data storage and inventory management
-
+-- Migration: Add characters table for per-player character management
 CREATE TABLE IF NOT EXISTS public.characters (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id text NOT NULL,
@@ -13,7 +11,7 @@ CREATE TABLE IF NOT EXISTS public.characters (
   stats jsonb DEFAULT '{}'::jsonb, -- { str:int, dex:int, con:int, int:int, wis:int, cha:int }
   current_hp integer,
   max_hp integer,
-  gold numeric DEFAULT 0, -- per-character gold tracking
+  gold numeric DEFAULT 0, -- per-character gold
   portrait_url text,
   notes text,
   created_at timestamptz DEFAULT now(),
@@ -23,6 +21,7 @@ CREATE TABLE IF NOT EXISTS public.characters (
   CONSTRAINT characters_campaign_id_fkey FOREIGN KEY (campaign_id) REFERENCES public.campaigns(id) ON DELETE SET NULL
 );
 
+-- Character inventory table
 CREATE TABLE IF NOT EXISTS public.character_inventories (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   character_id uuid NOT NULL,
@@ -42,54 +41,27 @@ ALTER TABLE public.character_inventories ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users can view their own characters" ON public.characters
   FOR SELECT USING (user_id = auth.uid());
 
-CREATE POLICY "Users can view characters in campaigns they belong to" ON public.characters
-  FOR SELECT USING (
-    campaign_id IN (
-      SELECT campaign_id FROM public.campaign_members WHERE user_id = auth.uid()
-    ) OR
-    campaign_id IN (
-      SELECT id FROM public.campaigns WHERE owner_id = auth.uid()
-    )
-  );
-
-CREATE POLICY "Users can insert their own characters" ON public.characters
+CREATE POLICY "Users can create their own characters" ON public.characters
   FOR INSERT WITH CHECK (user_id = auth.uid());
 
 CREATE POLICY "Users can update their own characters" ON public.characters
   FOR UPDATE USING (user_id = auth.uid());
 
-CREATE POLICY "Campaign owners can update characters in their campaigns" ON public.characters
-  FOR UPDATE USING (
-    campaign_id IN (
-      SELECT id FROM public.campaigns WHERE owner_id = auth.uid()
-    )
-  );
+CREATE POLICY "Users can delete their own characters" ON public.characters
+  FOR DELETE USING (user_id = auth.uid());
 
--- RLS Policies for character_inventories
-CREATE POLICY "Users can view inventories of their characters" ON public.character_inventories
+-- RLS Policies for character inventories
+CREATE POLICY "Users can view their character inventories" ON public.character_inventories
   FOR SELECT USING (
-    character_id IN (
-      SELECT id FROM public.characters WHERE user_id = auth.uid()
-    )
+    character_id IN (SELECT id FROM public.characters WHERE user_id = auth.uid())
   );
 
-CREATE POLICY "Campaign owners can view character inventories" ON public.character_inventories
-  FOR SELECT USING (
-    character_id IN (
-      SELECT id FROM public.characters WHERE campaign_id IN (
-        SELECT id FROM public.campaigns WHERE owner_id = auth.uid()
-      )
-    )
-  );
-
-CREATE POLICY "Users can manage inventories of their characters" ON public.character_inventories
+CREATE POLICY "Users can manage their character inventories" ON public.character_inventories
   FOR ALL USING (
-    character_id IN (
-      SELECT id FROM public.characters WHERE user_id = auth.uid()
-    )
+    character_id IN (SELECT id FROM public.characters WHERE user_id = auth.uid())
   );
 
--- Create indexes
+-- Indexes
 CREATE INDEX IF NOT EXISTS idx_characters_user_id ON public.characters(user_id);
 CREATE INDEX IF NOT EXISTS idx_characters_campaign_id ON public.characters(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_character_inventories_character_id ON public.character_inventories(character_id);

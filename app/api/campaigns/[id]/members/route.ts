@@ -15,9 +15,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     const { id: campaignId } = await params
+
+    console.log("[api/campaigns/members] GET processing", { reqId, campaignId, userId })
+
     const supabase = createAdminClient()
 
-    // Verify user has access to this campaign (owner or member)
+    // First verify user has access to this campaign
     const { data: campaign, error: campaignError } = await supabase
       .from("campaigns")
       .select("*")
@@ -25,19 +28,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       .single()
 
     if (campaignError || !campaign) {
-      console.log("[api/campaigns/members] GET campaign not found", {
-        reqId,
-        campaignId,
-        error: campaignError?.message,
-      })
+      console.log("[api/campaigns/members] GET campaign not found", { reqId, error: campaignError })
       return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
     }
 
     // Check if user is owner or member
-    const isOwner = campaign.owner_id === userId
+    let hasAccess = campaign.owner_id === userId
 
-    let isMember = false
-    if (!isOwner) {
+    if (!hasAccess) {
       const { data: memberCheck } = await supabase
         .from("campaign_members")
         .select("*")
@@ -45,73 +43,61 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         .eq("user_id", userId)
         .single()
 
-      isMember = !!memberCheck
+      hasAccess = !!memberCheck
     }
 
-    if (!isOwner && !isMember) {
+    if (!hasAccess) {
       console.log("[api/campaigns/members] GET access denied", { reqId, userId, campaignId })
       return NextResponse.json({ error: "Access denied" }, { status: 403 })
     }
 
-    // Get all members
-    const { data: members, error: membersError } = await supabase
+    // Get all members including the owner
+    const members = []
+
+    // Add the owner as a member
+    if (campaign.owner_id) {
+      const { data: ownerUser } = await supabase.from("users").select("*").eq("id", campaign.owner_id).single()
+
+      if (ownerUser) {
+        members.push({
+          id: `owner-${campaign.owner_id}`,
+          user_id: campaign.owner_id,
+          role: "Owner",
+          joined_at: campaign.created_at,
+          users: ownerUser,
+        })
+      }
+    }
+
+    // Get campaign members
+    const { data: campaignMembers, error: membersError } = await supabase
       .from("campaign_members")
       .select(`
         *,
-        users (
-          id,
-          name,
-          clerk_id
-        )
+        users (*)
       `)
       .eq("campaign_id", campaignId)
-      .order("joined_at", { ascending: true })
 
     if (membersError) {
-      console.log("[api/campaigns/members] GET members error", {
-        reqId,
-        error: membersError.message,
-      })
+      console.error("[api/campaigns/members] GET members error", { reqId, error: membersError })
       return NextResponse.json({ error: "Failed to fetch members" }, { status: 500 })
     }
 
-    // Add owner to the list if not already there
-    const ownerAsMember = members?.find((m) => m.user_id === campaign.owner_id)
-    let allMembers = members || []
-
-    if (!ownerAsMember && campaign.owner_id) {
-      // Get owner user data
-      const { data: ownerUser } = await supabase
-        .from("users")
-        .select("id, name, clerk_id")
-        .eq("id", campaign.owner_id)
-        .single()
-
-      if (ownerUser) {
-        allMembers = [
-          {
-            id: `owner-${campaign.id}`,
-            campaign_id: campaignId,
-            user_id: campaign.owner_id,
-            role: "Owner",
-            joined_at: campaign.created_at,
-            added_by: null,
-            users: ownerUser,
-          },
-          ...allMembers,
-        ]
-      }
+    // Add campaign members to the list
+    if (campaignMembers) {
+      members.push(...campaignMembers)
     }
 
     console.log("[api/campaigns/members] GET success", {
       reqId,
       campaignId,
-      memberCount: allMembers.length,
+      memberCount: members.length,
+      members: members.map((m) => ({ user_id: m.user_id, role: m.role })),
     })
 
-    return NextResponse.json(allMembers)
+    return NextResponse.json(members)
   } catch (error: any) {
-    console.error("[api/campaigns/members] GET error", { reqId, error: error.message })
+    console.error("[api/campaigns/members] GET error", { reqId, error: error.message, stack: error.stack })
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
@@ -130,63 +116,76 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
     const { id: campaignId } = await params
     const { searchParams } = new URL(request.url)
-    const memberUserId = searchParams.get("userId")
+    const userIdToRemove = searchParams.get("userId")
 
-    if (!memberUserId) {
+    if (!userIdToRemove) {
       console.log("[api/campaigns/members] DELETE missing userId", { reqId })
-      return NextResponse.json({ error: "User ID is required" }, { status: 400 })
+      return NextResponse.json({ error: "User ID to remove is required" }, { status: 400 })
     }
+
+    console.log("[api/campaigns/members] DELETE processing", {
+      reqId,
+      campaignId,
+      userIdToRemove,
+      removedBy: userId,
+    })
 
     const supabase = createAdminClient()
 
-    // Verify user is campaign owner
+    // First verify the campaign exists and the remover has permission
     const { data: campaign, error: campaignError } = await supabase
       .from("campaigns")
       .select("*")
       .eq("id", campaignId)
-      .eq("owner_id", userId)
       .single()
 
     if (campaignError || !campaign) {
-      console.log("[api/campaigns/members] DELETE not owner", {
-        reqId,
-        campaignId,
-        userId,
-        error: campaignError?.message,
-      })
-      return NextResponse.json({ error: "Campaign not found or access denied" }, { status: 404 })
+      console.log("[api/campaigns/members] DELETE campaign not found", { reqId, error: campaignError })
+      return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
     }
 
-    // Can't remove the owner
-    if (memberUserId === campaign.owner_id) {
-      console.log("[api/campaigns/members] DELETE cannot remove owner", { reqId, memberUserId })
-      return NextResponse.json({ error: "Cannot remove campaign owner" }, { status: 400 })
+    // Check if remover is the owner or has DM permissions
+    if (campaign.owner_id !== userId) {
+      const { data: memberCheck } = await supabase
+        .from("campaign_members")
+        .select("role")
+        .eq("campaign_id", campaignId)
+        .eq("user_id", userId)
+        .single()
+
+      if (!memberCheck || memberCheck.role !== "DM") {
+        console.log("[api/campaigns/members] DELETE insufficient permissions", {
+          reqId,
+          userId,
+          campaignOwnerId: campaign.owner_id,
+        })
+        return NextResponse.json({ error: "Only campaign owners and DMs can remove members" }, { status: 403 })
+      }
     }
 
-    // Remove from campaign_members
+    // Cannot remove the owner
+    if (userIdToRemove === campaign.owner_id) {
+      console.log("[api/campaigns/members] DELETE cannot remove owner", { reqId, userIdToRemove })
+      return NextResponse.json({ error: "Cannot remove the campaign owner" }, { status: 400 })
+    }
+
+    // Remove the member
     const { error: removeError } = await supabase
       .from("campaign_members")
       .delete()
       .eq("campaign_id", campaignId)
-      .eq("user_id", memberUserId)
+      .eq("user_id", userIdToRemove)
 
     if (removeError) {
-      console.log("[api/campaigns/members] DELETE remove error", {
-        reqId,
-        error: removeError.message,
-      })
+      console.error("[api/campaigns/members] DELETE failed to remove member", { reqId, error: removeError })
       return NextResponse.json({ error: "Failed to remove member" }, { status: 500 })
     }
 
-    console.log("[api/campaigns/members] DELETE success", {
-      reqId,
-      campaignId,
-      memberUserId,
-    })
+    console.log("[api/campaigns/members] DELETE success", { reqId, campaignId, userIdToRemove })
 
-    return NextResponse.json({ message: "Member removed successfully" })
+    return NextResponse.json({ success: true, message: "Member removed successfully" })
   } catch (error: any) {
-    console.error("[api/campaigns/members] DELETE error", { reqId, error: error.message })
+    console.error("[api/campaigns/members] DELETE error", { reqId, error: error.message, stack: error.stack })
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

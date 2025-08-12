@@ -5,75 +5,66 @@ import { createAdminClient } from "@/lib/supabaseAdmin"
 export const runtime = "nodejs"
 
 function rid() {
-  return Math.random().toString(36).slice(2, 8)
+  return Math.random().toString(36).substring(7)
 }
 
 /**
  * POST /api/campaigns/:id/invite
  * Invites a user to join a campaign
  */
-export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const reqId = rid()
   const { id: campaignId } = await params
 
   try {
-    const { userId } = getAuth(req)
-    console.log("[api/campaigns/invite] POST start", { reqId, campaignId, hasUser: !!userId })
+    console.log("[api/campaigns/invite] POST start", { reqId, campaignId })
+
+    const { userId } = await getAuth(request)
 
     if (!userId) {
-      console.warn("[api/campaigns/invite] POST unauthorized", { reqId })
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 })
+      console.log("[api/campaigns/invite] POST unauthorized", { reqId })
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // Parse request body
-    let body
-    try {
-      body = await req.json()
-    } catch {
-      return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 })
-    }
-
+    const body = await request.json()
     const { inviteeId } = body
 
-    if (!inviteeId?.trim()) {
-      return NextResponse.json({ ok: false, error: "Invitee ID is required" }, { status: 400 })
+    if (!inviteeId) {
+      return NextResponse.json({ error: "Invitee ID is required" }, { status: 400 })
     }
 
     const supabase = createAdminClient()
 
-    // Step 1: Verify campaign exists and user is owner
-    console.log("[api/campaigns/invite] Checking campaign ownership", { reqId, campaignId, userId })
+    // 1. Verify caller is campaign owner or DM
     const { data: campaign, error: campaignError } = await supabase
       .from("campaigns")
-      .select("id, name, owner_id, settings")
+      .select("owner_id, name, settings")
       .eq("id", campaignId)
       .single()
 
     if (campaignError || !campaign) {
-      console.error("[api/campaigns/invite] Campaign not found", { reqId, error: campaignError?.message })
-      return NextResponse.json({ ok: false, error: "Campaign not found" }, { status: 404 })
+      console.log("[api/campaigns/invite] POST campaign not found", { reqId, error: campaignError?.message })
+      return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
     }
 
     if (campaign.owner_id !== userId) {
-      console.warn("[api/campaigns/invite] Not campaign owner", { reqId, ownerId: campaign.owner_id, userId })
-      return NextResponse.json({ ok: false, error: "Only campaign owner can invite players" }, { status: 403 })
+      console.log("[api/campaigns/invite] POST not owner", { reqId, userId, ownerId: campaign.owner_id })
+      return NextResponse.json({ error: "Only campaign owner can invite players" }, { status: 403 })
     }
 
-    // Step 2: Verify invitee exists
-    console.log("[api/campaigns/invite] Checking invitee exists", { reqId, inviteeId })
-    const { data: invitee, error: inviteeError } = await supabase
+    // 2. Verify invitee exists
+    const { data: inviteeUser, error: userError } = await supabase
       .from("users")
-      .select("id, name, email")
+      .select("id, email, name")
       .eq("id", inviteeId)
       .single()
 
-    if (inviteeError || !invitee) {
-      console.error("[api/campaigns/invite] Invitee not found", { reqId, error: inviteeError?.message })
-      return NextResponse.json({ ok: false, error: "User not found" }, { status: 404 })
+    if (userError || !inviteeUser) {
+      console.log("[api/campaigns/invite] POST user not found", { reqId, inviteeId, error: userError?.message })
+      return NextResponse.json({ error: "User not found" }, { status: 404 })
     }
 
-    // Step 3: Check if already a member
-    console.log("[api/campaigns/invite] Checking existing membership", { reqId })
+    // 3. Check if already a member
     const { data: existingMember, error: memberCheckError } = await supabase
       .from("campaign_members")
       .select("id, role")
@@ -82,25 +73,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .single()
 
     if (memberCheckError && memberCheckError.code !== "PGRST116") {
-      console.error("[api/campaigns/invite] Error checking membership", { reqId, error: memberCheckError.message })
-      return NextResponse.json({ ok: false, error: "Database error" }, { status: 500 })
+      console.log("[api/campaigns/invite] POST member check error", { reqId, error: memberCheckError.message })
+      throw memberCheckError
     }
 
     if (existingMember) {
-      console.log("[api/campaigns/invite] User already member", { reqId, role: existingMember.role })
+      console.log("[api/campaigns/invite] POST already member", { reqId, inviteeId, role: existingMember.role })
       return NextResponse.json({
         ok: true,
         already_member: true,
         member: {
           user_id: inviteeId,
           role: existingMember.role,
+          user: inviteeUser,
         },
       })
     }
 
-    // Step 4: Add user as campaign member
-    console.log("[api/campaigns/invite] Adding campaign member", { reqId })
-    const { data: newMember, error: memberError } = await supabase
+    // 4. Begin transaction-like operations
+    console.log("[api/campaigns/invite] POST starting invite process", { reqId, inviteeId })
+
+    // Insert into campaign_members
+    const { data: newMember, error: insertMemberError } = await supabase
       .from("campaign_members")
       .insert({
         campaign_id: campaignId,
@@ -108,16 +102,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         role: "Player",
         added_by: userId,
       })
-      .select("id, user_id, role, joined_at")
+      .select()
       .single()
 
-    if (memberError) {
-      console.error("[api/campaigns/invite] Error creating member", { reqId, error: memberError.message })
-      return NextResponse.json({ ok: false, error: "Failed to add member" }, { status: 500 })
+    if (insertMemberError) {
+      console.log("[api/campaigns/invite] POST member insert error", { reqId, error: insertMemberError.message })
+      throw insertMemberError
     }
 
-    // Step 5: Update campaign settings to include new player
-    console.log("[api/campaigns/invite] Updating campaign settings", { reqId })
+    // Update campaign settings to include player
     const currentPlayers = campaign.settings?.players || []
     if (!currentPlayers.includes(inviteeId)) {
       const updatedSettings = {
@@ -131,95 +124,99 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         .eq("id", campaignId)
 
       if (settingsError) {
-        console.warn("[api/campaigns/invite] Error updating settings", { reqId, error: settingsError.message })
-        // Don't fail the invite for this
+        console.log("[api/campaigns/invite] POST settings update error", { reqId, error: settingsError.message })
+        // Don't throw - member record is more important
       }
     }
 
-    // Step 6: Ensure player has gold record
-    console.log("[api/campaigns/invite] Creating gold record", { reqId })
+    // Ensure players_gold record exists
     const { error: goldError } = await supabase.from("players_gold").upsert(
       {
         player_id: inviteeId,
         campaign_id: campaignId,
-        gold: 100, // Starting gold
+        gold: 0,
       },
-      { onConflict: "player_id,campaign_id" },
+      {
+        onConflict: "player_id,campaign_id",
+      },
     )
 
     if (goldError) {
-      console.warn("[api/campaigns/invite] Error creating gold record", { reqId, error: goldError.message })
-      // Don't fail the invite for this
+      console.log("[api/campaigns/invite] POST gold upsert error", { reqId, error: goldError.message })
+      // Don't throw - not critical
     }
 
-    // Step 7: Add to active sessions in this campaign
-    console.log("[api/campaigns/invite] Adding to active sessions", { reqId })
+    // Add to active sessions in this campaign
     const { data: sessions, error: sessionsError } = await supabase
       .from("sessions")
       .select("id, participants")
       .eq("campaign_id", campaignId)
+      .eq("active", true)
 
     if (!sessionsError && sessions) {
       for (const session of sessions) {
-        // Add to session_participants table
-        await supabase.from("session_participants").upsert(
+        // Add to session_participants
+        const { error: sessionParticipantError } = await supabase.from("session_participants").upsert(
           {
             session_id: session.id,
             user_id: inviteeId,
-            role: "Player",
           },
-          { onConflict: "session_id,user_id" },
+          {
+            onConflict: "session_id,user_id",
+          },
         )
+
+        if (sessionParticipantError) {
+          console.log("[api/campaigns/invite] POST session participant error", {
+            reqId,
+            sessionId: session.id,
+            error: sessionParticipantError.message,
+          })
+        }
 
         // Update sessions.participants JSONB for legacy compatibility
         const currentParticipants = session.participants || []
         if (!currentParticipants.includes(inviteeId)) {
-          await supabase
+          const { error: sessionUpdateError } = await supabase
             .from("sessions")
             .update({
               participants: [...currentParticipants, inviteeId],
             })
             .eq("id", session.id)
+
+          if (sessionUpdateError) {
+            console.log("[api/campaigns/invite] POST session update error", {
+              reqId,
+              sessionId: session.id,
+              error: sessionUpdateError.message,
+            })
+          }
         }
       }
     }
 
-    // Step 8: Send realtime event
-    try {
-      const channel = supabase.channel(`campaign:${campaignId}`)
-      await channel.send({
-        type: "broadcast",
-        event: "CAMPAIGN_MEMBER_ADDED",
-        payload: {
-          member: {
-            user_id: inviteeId,
-            role: "Player",
-            name: invitee.name,
-            email: invitee.email,
-          },
-          campaign_id: campaignId,
-          added_by: userId,
-        },
-      })
-    } catch (realtimeError) {
-      console.warn("[api/campaigns/invite] Realtime event failed", { reqId, error: realtimeError })
-      // Don't fail the invite for this
-    }
+    console.log("[api/campaigns/invite] POST success", {
+      reqId,
+      campaignId,
+      inviteeId,
+      memberRole: newMember.role,
+    })
 
-    console.log("[api/campaigns/invite] POST success", { reqId, memberId: newMember.id })
+    // Return success response
     return NextResponse.json({
       ok: true,
       already_member: false,
       member: {
-        user_id: inviteeId,
-        role: "Player",
-        joined_at: newMember.joined_at,
-        name: invitee.name,
-        email: invitee.email,
+        ...newMember,
+        user: inviteeUser,
       },
     })
-  } catch (e: any) {
-    console.error("[api/campaigns/invite] POST exception", { reqId, message: e?.message, stack: e?.stack })
-    return NextResponse.json({ ok: false, error: "Internal server error" }, { status: 500 })
+  } catch (error: any) {
+    console.log("[api/campaigns/invite] POST error", {
+      reqId,
+      campaignId,
+      error: error.message || error.toString(),
+    })
+    return NextResponse.json({ error: "Failed to invite user to campaign" }, { status: 500 })
   }
 }

@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const { userId } = getAuth(req)
-    console.log("[api/campaigns] GET start", { reqId, hasUser: !!userId })
+    console.log("[api/campaigns] GET start", { reqId, hasUser: !!userId, userId })
 
     if (!userId) {
       console.warn("[api/campaigns] GET unauthorized", { reqId })
@@ -26,37 +26,50 @@ export async function GET(req: NextRequest) {
 
     const supabase = createAdminClient()
 
-    // Fetch campaigns where user is owner OR member
-    const { data: campaigns, error } = await supabase
+    // First, get campaigns where user is the owner
+    const { data: ownedCampaigns, error: ownedError } = await supabase
       .from("campaigns")
-      .select(`
-        id,
-        name,
-        description,
-        owner_id,
-        settings,
-        created_at,
-        updated_at,
-        campaign_members!inner (
-          role,
-          joined_at
-        )
-      `)
-      .or(`owner_id.eq.${userId},campaign_members.user_id.eq.${userId}`)
+      .select("id, name, description, owner_id, settings, created_at, updated_at")
+      .eq("owner_id", userId)
       .order("created_at", { ascending: false })
 
-    if (error) {
-      console.error("[api/campaigns] GET error", { reqId, error: error.message })
-      return NextResponse.json({ error: "Failed to fetch campaigns" }, { status: 500 })
+    if (ownedError) {
+      console.error("[api/campaigns] GET owned campaigns error", { reqId, error: ownedError.message })
+      return NextResponse.json({ error: "Failed to fetch owned campaigns" }, { status: 500 })
     }
 
-    // Transform the data to include user's role
-    const transformedCampaigns =
-      campaigns?.map((campaign) => {
-        const isOwner = campaign.owner_id === userId
-        const memberInfo = campaign.campaign_members?.[0]
+    // Then, get campaigns where user is a member
+    const { data: memberCampaigns, error: memberError } = await supabase
+      .from("campaign_members")
+      .select(`
+        campaign_id,
+        role,
+        joined_at,
+        campaigns (
+          id,
+          name,
+          description,
+          owner_id,
+          settings,
+          created_at,
+          updated_at
+        )
+      `)
+      .eq("user_id", userId)
+      .neq("role", "Owner") // Exclude owner role to avoid duplicates
 
-        return {
+    if (memberError) {
+      console.error("[api/campaigns] GET member campaigns error", { reqId, error: memberError.message })
+      return NextResponse.json({ error: "Failed to fetch member campaigns" }, { status: 500 })
+    }
+
+    // Combine and transform the results
+    const allCampaigns = []
+
+    // Add owned campaigns
+    if (ownedCampaigns) {
+      for (const campaign of ownedCampaigns) {
+        allCampaigns.push({
           id: campaign.id,
           name: campaign.name,
           description: campaign.description,
@@ -64,16 +77,46 @@ export async function GET(req: NextRequest) {
           settings: campaign.settings,
           created_at: campaign.created_at,
           updated_at: campaign.updated_at,
-          user_role: isOwner ? "Owner" : memberInfo?.role || "Member",
-          joined_at: isOwner ? campaign.created_at : memberInfo?.joined_at,
-          is_owner: isOwner,
-        }
-      }) || []
+          user_role: "Owner",
+          joined_at: campaign.created_at,
+          is_owner: true,
+        })
+      }
+    }
 
-    console.log("[api/campaigns] GET success", { reqId, count: transformedCampaigns.length })
-    return NextResponse.json({ campaigns: transformedCampaigns })
+    // Add member campaigns
+    if (memberCampaigns) {
+      for (const member of memberCampaigns) {
+        if (member.campaigns) {
+          allCampaigns.push({
+            id: member.campaigns.id,
+            name: member.campaigns.name,
+            description: member.campaigns.description,
+            owner_id: member.campaigns.owner_id,
+            settings: member.campaigns.settings,
+            created_at: member.campaigns.created_at,
+            updated_at: member.campaigns.updated_at,
+            user_role: member.role,
+            joined_at: member.joined_at,
+            is_owner: false,
+          })
+        }
+      }
+    }
+
+    // Sort by created_at descending
+    allCampaigns.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+    console.log("[api/campaigns] GET success", {
+      reqId,
+      totalCount: allCampaigns.length,
+      ownedCount: ownedCampaigns?.length || 0,
+      memberCount: memberCampaigns?.length || 0,
+    })
+
+    return NextResponse.json({ campaigns: allCampaigns })
   } catch (e: any) {
-    console.error("[api/campaigns] GET exception", { reqId, message: e?.message })
+    console.error("[api/campaigns] GET exception", { reqId, message: e?.message, stack: e?.stack })
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
@@ -130,11 +173,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Failed to create campaign" }, { status: 500 })
     }
 
-    // Add creator as campaign member with DM role
+    // Add creator as campaign member with Owner role
     const { error: memberError } = await supabase.from("campaign_members").insert({
       campaign_id: campaign.id,
       user_id: userId,
-      role: "DM",
+      role: "Owner",
       added_by: userId,
     })
 
@@ -144,7 +187,7 @@ export async function POST(req: NextRequest) {
     }
 
     console.log("[api/campaigns] POST success", { reqId, campaignId: campaign.id })
-    return NextResponse.json({ campaign })
+    return NextResponse.json({ campaign }, { status: 201 })
   } catch (e: any) {
     console.error("[api/campaigns] POST exception", { reqId, message: e?.message })
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })

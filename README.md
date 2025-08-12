@@ -2,63 +2,180 @@
 
 Real-time collaborative RPG app with Supabase Realtime, Clerk authentication, and AI-powered generators.
 
-## What changed (this update)
+## What's New - Iteration 1: Invite Flow & Campaign Membership
 
-- Canvas map:
-  - Full-height center canvas that fits the viewport; sidebars scroll independently.
-  - Smoother pan/zoom (spacebar + drag, middle/right-drag, scroll to zoom).
-  - Circular tokens with soft borders (red for enemies, blue for players).
-  - Default grid size is 20x20 when not provided.
-  - Background image support: uses LLM-generated background if available; otherwise falls back to `/1.jpg`.
+### Features Added
+- **Campaign Membership System**: New `campaign_members` table for explicit membership tracking
+- **Character System**: Full character creation and management with per-character gold
+- **Token Ownership**: Tokens now have owners and permission-based movement
+- **Improved Invite Flow**: Bulletproof invite system with proper error handling and realtime updates
 
-- DM Tools moved to a top hover tab in the header.
+### Database Changes
+- Added `campaign_members` table with RLS policies
+- Added `characters` and `character_inventories` tables
+- Enhanced `tokens` table with ownership and position tracking
+- Added `session_participants` normalized table
+- Added unique constraints for data integrity
 
-- Battles switcher:
-  - A dropdown above “Current Battle” shows all battles in the session (by timestamp).
-  - Selecting a battle loads its previous activity log.
+### API Endpoints Added
+- `POST /api/campaigns/:campaignId/invite` - Invite users to campaigns
+- `GET /api/campaigns/:campaignId/members` - List campaign members
 
-- Chat UX:
-  - Timestamps, me-alignment to the right, others to the left, and disabled send button while sending.
-
-- Stability AI integration:
-  - New `/api/generate-map` route that generates a bright, vibrant, top-down battle map image.
-  - `/api/generate-battle` now calls Stability to set the map `background_image`.
-
-- Database:
-  - New migration adding `maps.background_image` (TEXT).
+### Frontend Components Added
+- `InviteUserForm` - Form to invite users with toast notifications
+- `CampaignMembersList` - Display campaign members with roles
+- Campaign settings page with tabbed interface
 
 ## Setup Steps
 
-1) Clerk + Supabase (from earlier)
-- Ensure JWT template and Supabase JWT verification are configured correctly (RS256 via JWKS or HS256 shared secret).
-- Use TEXT user IDs and RLS policies with `auth.jwt()->>'sub'` (already in `scripts/init-db.sql`) [^5].
+### 1. Database Setup
+Run the new migration files in your Supabase SQL Editor:
 
-2) Run the new SQL migration
-- In Supabase SQL Editor, run:
-  - `scripts/v3-add-background.sql`
+\`\`\`sql
+-- Run these in order:
+scripts/v14-campaign-members.sql
+scripts/v15-characters.sql  
+scripts/v16-token-ownership.sql
+scripts/v17-session-participants.sql
+scripts/v18-players-gold-unique.sql
+\`\`\`
 
-3) Stability AI
-- Create a Stability API key at platform.stability.ai.
-- In your environment add:
-  - `STABILITY_API_KEY=YOUR_STABILITY_API_KEY`
-- The image route is: `POST /api/generate-map` accepting `{ "prompt": "..." }`.
-- `/api/generate-battle` automatically calls Stability with a structured prompt to get a vibrant, top-down background image.
+### 2. Environment Variables
+Ensure these are set in your `.env.local`:
 
-4) LLM text generation
-- We keep using the AI SDK for structured text generation (OpenAI) for monster/PC stats and initial logs [^6].
-- Ensure `OPENAI_API_KEY` is set.
+\`\`\`bash
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 
-5) Local testing checklist
-- Sign out, clear local storage, then sign in.
-- Click DM Tools → Generate Battle to create a new map + battle.
-- Use the Battles dropdown (right sidebar) to switch between prior battles; activity log updates accordingly.
-- Try panning and zooming the map: spacebar or middle/right-drag to pan; scroll to zoom.
-- If Stability is not configured, map falls back to `/1.jpg` (add numbered images like `/1.jpg`, `/2.jpg`, … in public).
+# Clerk
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
+CLERK_SECRET_KEY=your_clerk_secret_key
+NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
 
-## Notes
+# AI (for future iterations)
+OPENAI_API_KEY=your_openai_api_key
+STABILITY_API_KEY=your_stability_api_key
+\`\`\`
 
-- If you see PostgREST auth errors (e.g., PGRST301), revisit JWT config and ensure the Clerk token matches your Supabase expectations (RS256+JWKS vs HS256) [^5].
-- The AI SDK centralizes LLM usage; swapping or tuning models is simple and contained [^6].
+### 3. Install Dependencies & Run
 
-[^5]: Setting up SSR clients and server actions with Supabase and migrating from auth-helpers to SSR package.  
-[^6]: Vercel AI SDK for standardized LLM usage with `generateText`/`streamText`.
+\`\`\`bash
+npm install
+npm run dev
+\`\`\`
+
+### 4. Seed Test Data (Optional)
+
+\`\`\`bash
+npx tsx scripts/seed-test-data.ts
+\`\`\`
+
+This creates test users and a campaign for manual testing.
+
+## Testing
+
+### Run Unit Tests
+
+\`\`\`bash
+npm test
+\`\`\`
+
+### Manual Testing Checklist
+
+#### Invite Flow Testing
+1. **Setup**: Use seeded test data or create users manually
+2. **DM Invite Success**: 
+   - Login as DM (dm-user-123)
+   - Go to `/campaigns/test-campaign-123/settings`
+   - Invite player-user-456
+   - Should see green success toast
+   - Check database: `campaign_members` should have new row
+3. **Player Access**: 
+   - Login as invited player
+   - Should see campaign in campaigns list
+   - Should be able to access campaign pages
+4. **Duplicate Invite**: 
+   - Try inviting same user again
+   - Should see "Already a member" message
+5. **Error Cases**:
+   - Try inviting non-existent user → should see error toast
+   - Try inviting as non-DM → should see permission error
+
+#### Database Integrity Testing
+1. Check `campaign_members` table has proper foreign key constraints
+2. Verify RLS policies prevent unauthorized access
+3. Test that `players_gold` rows are created automatically on invite
+
+### Edge Cases Discovered
+
+1. **Concurrent Invites**: Multiple DMs inviting same user simultaneously could cause race conditions
+   - **Mitigation**: Using `ON CONFLICT DO NOTHING` with proper error handling
+
+2. **Orphaned Sessions**: If campaign is deleted, session participants might remain
+   - **Mitigation**: CASCADE deletes in foreign key constraints
+
+3. **Permission Edge Case**: User could be campaign member but not session participant
+   - **Mitigation**: Invite flow now adds to both tables
+
+4. **Realtime Event Delivery**: Events might not reach all clients if connection drops
+   - **Mitigation**: Client-side refresh mechanisms and optimistic updates
+
+## API Testing with curl
+
+### Test Invite Endpoint
+
+\`\`\`bash
+# Success case (replace with real auth token)
+curl -X POST http://localhost:3000/api/campaigns/test-campaign-123/invite \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_CLERK_TOKEN" \
+  -d '{"inviteeId": "player-user-456"}'
+
+# Expected response:
+# {"ok": true, "member": {...}, "already_member": false}
+\`\`\`
+
+### Test Members Endpoint
+
+\`\`\`bash
+curl -X GET http://localhost:3000/api/campaigns/test-campaign-123/members \
+  -H "Authorization: Bearer YOUR_CLERK_TOKEN"
+
+# Expected response:
+# {"members": [{"id": "...", "user_id": "...", "role": "Player", ...}]}
+\`\`\`
+
+## Next Steps (Iteration 2)
+
+- Character creation and management UI
+- Token spawning and ownership system  
+- Draggable canvas map with permission enforcement
+- Realtime token movement synchronization
+
+## Troubleshooting
+
+### Common Issues
+
+1. **"User not found" errors**: Ensure test users exist in `users` table
+2. **Permission denied**: Check RLS policies and user authentication
+3. **Realtime not working**: Verify Supabase realtime is enabled for tables
+4. **Tests failing**: Run `npm run test:setup` to ensure test environment is configured
+
+### Debug Mode
+
+Set `DEBUG=true` in environment to enable detailed API logging.
+
+---
+
+## Previous Features
+
+- Canvas map with full-height center canvas and smooth pan/zoom
+- Circular tokens with soft borders (red for enemies, blue for players)
+- DM Tools in hover tab with battle generation
+- Battles switcher dropdown with activity log loading
+- Chat UX with timestamps and user alignment
+- Stability AI integration for map generation
+- Database with comprehensive RLS policies

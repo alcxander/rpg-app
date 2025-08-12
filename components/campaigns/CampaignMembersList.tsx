@@ -2,47 +2,32 @@
 
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Users, Crown, Shield, User } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { Loader2, Users, Crown, Shield, User, Trash2 } from "lucide-react"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/dialog"
 
 interface CampaignMember {
   id: string
   user_id: string
   role: string
   joined_at: string
-  added_by?: string
-  users?: {
+  users: {
     id: string
-    name?: string
-    email?: string
-    avatar_url?: string
+    name: string
+    email: string
+    image_url?: string
   }
 }
 
 interface CampaignMembersListProps {
   campaignId: string
-  isOwner: boolean
   refreshTrigger?: number
 }
 
-export function CampaignMembersList({ campaignId, isOwner, refreshTrigger }: CampaignMembersListProps) {
+export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMembersListProps) {
   const [members, setMembers] = useState<CampaignMember[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [removingMemberId, setRemovingMemberId] = useState<string | null>(null)
   const { toast } = useToast()
 
   const fetchMembers = async () => {
@@ -64,39 +49,6 @@ export function CampaignMembersList({ campaignId, isOwner, refreshTrigger }: Cam
       })
     } finally {
       setIsLoading(false)
-    }
-  }
-
-  const removeMember = async (memberUserId: string) => {
-    setRemovingMemberId(memberUserId)
-
-    try {
-      const response = await fetch(`/api/campaigns/${campaignId}/members?userId=${memberUserId}`, {
-        method: "DELETE",
-      })
-
-      if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.error || "Failed to remove member")
-      }
-
-      toast({
-        title: "Member removed",
-        description: "The member has been removed from the campaign",
-        variant: "default",
-      })
-
-      // Refresh the members list
-      await fetchMembers()
-    } catch (error) {
-      console.error("Failed to remove member:", error)
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to remove member",
-        variant: "destructive",
-      })
-    } finally {
-      setRemovingMemberId(null)
     }
   }
 
@@ -136,9 +88,16 @@ export function CampaignMembersList({ campaignId, isOwner, refreshTrigger }: Cam
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin" />
-            <span className="ml-2">Loading members...</span>
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center space-x-3 animate-pulse">
+                <div className="w-10 h-10 bg-gray-200 rounded-full" />
+                <div className="flex-1 space-y-1">
+                  <div className="h-4 bg-gray-200 rounded w-1/3" />
+                  <div className="h-3 bg-gray-200 rounded w-1/2" />
+                </div>
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
@@ -153,77 +112,41 @@ export function CampaignMembersList({ campaignId, isOwner, refreshTrigger }: Cam
           Campaign Members
         </CardTitle>
         <CardDescription>
-          {members.length} {members.length === 1 ? "member" : "members"} in this campaign
+          {members.length} member{members.length !== 1 ? "s" : ""} in this campaign
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {members.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
-            <p>No members found</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {members.map((member) => (
-              <div key={member.id} className="flex items-center justify-between p-4 border rounded-lg">
-                <div className="flex items-center gap-3">
-                  <Avatar>
-                    <AvatarImage src={member.users?.avatar_url || "/placeholder.svg"} />
-                    <AvatarFallback>
-                      {member.users?.name?.charAt(0) || member.user_id.charAt(0).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium">{member.users?.name || member.user_id}</p>
-                      <Badge className={getRoleColor(member.role)}>
-                        {getRoleIcon(member.role)}
-                        <span className="ml-1">{member.role}</span>
-                      </Badge>
-                    </div>
-                    {member.users?.email && <p className="text-sm text-muted-foreground">{member.users.email}</p>}
-                    <p className="text-xs text-muted-foreground">
-                      Joined {new Date(member.joined_at).toLocaleDateString()}
-                    </p>
-                  </div>
+        <div className="space-y-3">
+          {members.map((member) => (
+            <div key={member.id} className="flex items-center justify-between p-3 border rounded-lg">
+              <div className="flex items-center space-x-3">
+                <Avatar>
+                  <AvatarImage src={member.users.image_url || "/placeholder.svg"} />
+                  <AvatarFallback>{member.users.name?.charAt(0)?.toUpperCase() || "U"}</AvatarFallback>
+                </Avatar>
+                <div>
+                  <p className="font-medium">{member.users.name || "Unknown User"}</p>
+                  <p className="text-sm text-muted-foreground">{member.users.email}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Joined {new Date(member.joined_at).toLocaleDateString()}
+                  </p>
                 </div>
-
-                {isOwner && member.role !== "Owner" && (
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button variant="outline" size="sm" disabled={removingMemberId === member.user_id}>
-                        {removingMemberId === member.user_id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Remove Member</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          Are you sure you want to remove {member.users?.name || member.user_id} from this campaign?
-                          This action cannot be undone.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction
-                          onClick={() => removeMember(member.user_id)}
-                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                        >
-                          Remove Member
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                )}
               </div>
-            ))}
-          </div>
-        )}
+              <Badge className={getRoleColor(member.role)}>
+                {getRoleIcon(member.role)}
+                <span className="ml-1">{member.role}</span>
+              </Badge>
+            </div>
+          ))}
+
+          {members.length === 0 && (
+            <div className="text-center py-8 text-muted-foreground">
+              <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p>No members found</p>
+              <p className="text-sm">Invite players to get started</p>
+            </div>
+          )}
+        </div>
       </CardContent>
     </Card>
   )

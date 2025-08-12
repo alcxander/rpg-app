@@ -7,15 +7,11 @@ CREATE TABLE IF NOT EXISTS public.session_participants (
   user_id text NOT NULL,
   joined_at timestamptz DEFAULT now(),
   CONSTRAINT session_participants_pkey PRIMARY KEY (id),
+  CONSTRAINT session_participants_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.sessions(id) ON DELETE CASCADE,
   CONSTRAINT session_participants_unique UNIQUE (session_id, user_id)
 );
 
 -- Add foreign key constraints
-ALTER TABLE public.session_participants 
-  ADD CONSTRAINT session_participants_session_id_fkey 
-  FOREIGN KEY (session_id) REFERENCES public.sessions(id) ON DELETE CASCADE;
-
--- Only add user foreign key if users table exists
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'users' AND table_schema = 'public') THEN
@@ -39,23 +35,19 @@ CREATE INDEX IF NOT EXISTS idx_session_participants_user_id ON public.session_pa
 ALTER TABLE public.session_participants ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies
-CREATE POLICY "Users can view session participants for sessions they're in" ON public.session_participants
+CREATE POLICY "Users can view session participants" ON public.session_participants
   FOR SELECT USING (
-    user_id = auth.uid()::text
+    user_id = (SELECT auth.uid()::text)
     OR
     session_id IN (
-      SELECT id FROM public.sessions WHERE owner_id = auth.uid()::text
-    )
-    OR
-    session_id IN (
-      SELECT session_id FROM public.session_participants WHERE user_id = auth.uid()::text
+      SELECT id FROM public.sessions WHERE owner_id = (SELECT auth.uid()::text)
     )
   );
 
 CREATE POLICY "Session owners can manage participants" ON public.session_participants
   FOR ALL USING (
     session_id IN (
-      SELECT id FROM public.sessions WHERE owner_id = auth.uid()::text
+      SELECT id FROM public.sessions WHERE owner_id = (SELECT auth.uid()::text)
     )
   );
 

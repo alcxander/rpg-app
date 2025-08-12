@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
     }
 
     console.log("[api/campaigns] POST success", { reqId, campaignId: campaign.id })
-    return NextResponse.json({ campaign })
+    return NextResponse.json(campaign)
   } catch (error: any) {
     console.error("[api/campaigns] POST error", { reqId, error: error.message })
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })

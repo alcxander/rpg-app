@@ -1,12 +1,10 @@
 "use client"
 
-import { use } from "react"
+import { useState, use } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { InviteUserForm } from "@/components/campaigns/InviteUserForm"
 import { CampaignMembersList } from "@/components/campaigns/CampaignMembersList"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Settings, Users, UserPlus } from "lucide-react"
-import { useState } from "react"
 
 interface CampaignSettingsPageProps {
   params: Promise<{ id: string }>
@@ -17,7 +15,7 @@ export default function CampaignSettingsPage({ params }: CampaignSettingsPagePro
   const [refreshTrigger, setRefreshTrigger] = useState(0)
 
   const handleInviteSuccess = () => {
-    // Trigger refresh of members list
+    // Trigger a refresh of the members list
     setRefreshTrigger((prev) => prev + 1)
   }
 
@@ -31,7 +29,7 @@ export default function CampaignSettingsPage({ params }: CampaignSettingsPagePro
         <p className="text-muted-foreground mt-2">Manage your campaign members and settings</p>
       </div>
 
-      <Tabs defaultValue="members" className="space-y-6">
+      <Tabs defaultValue="members" className="w-full">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="members" className="flex items-center gap-2">
             <Users className="h-4 w-4" />
@@ -43,35 +41,12 @@ export default function CampaignSettingsPage({ params }: CampaignSettingsPagePro
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="members" className="space-y-6">
+        <TabsContent value="members" className="mt-6">
           <CampaignMembersList campaignId={campaignId} refreshTrigger={refreshTrigger} />
         </TabsContent>
 
-        <TabsContent value="invite" className="space-y-6">
+        <TabsContent value="invite" className="mt-6">
           <InviteUserForm campaignId={campaignId} onInviteSuccess={handleInviteSuccess} />
-
-          <Card>
-            <CardHeader>
-              <CardTitle>How to Find User IDs</CardTitle>
-              <CardDescription>Instructions for finding user IDs to invite players</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <h4 className="font-medium mb-2">For Clerk Authentication:</h4>
-                <ol className="list-decimal list-inside space-y-1 text-sm text-muted-foreground">
-                  <li>Go to your Clerk Dashboard</li>
-                  <li>Navigate to Users section</li>
-                  <li>Find the user you want to invite</li>
-                  <li>Copy their User ID (starts with "user_")</li>
-                </ol>
-              </div>
-
-              <div>
-                <h4 className="font-medium mb-2">User ID Format:</h4>
-                <code className="text-xs bg-muted px-2 py-1 rounded">user_2ABC123DEF456GHI789</code>
-              </div>
-            </CardContent>
-          </Card>
         </TabsContent>
       </Tabs>
     </div>

@@ -26,7 +26,7 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
     if (!inviteeId.trim()) {
       toast({
         title: "Error",
-        description: "Please enter a user ID to invite",
+        description: "Please enter a user ID",
         variant: "destructive",
       })
       return
@@ -53,24 +53,23 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
 
       if (data.already_member) {
         toast({
-          title: "Already a Member",
+          title: "Already a member",
           description: "This user is already a member of the campaign",
           variant: "default",
         })
       } else {
         toast({
           title: "Success!",
-          description: "Player successfully added to campaign",
+          description: data.message || "User successfully invited to campaign",
           variant: "default",
         })
-
         setInviteeId("")
         onInviteSuccess?.()
       }
     } catch (error) {
       console.error("Invite error:", error)
       toast({
-        title: "Invite Failed",
+        title: "Error",
         description: error instanceof Error ? error.message : "Failed to invite user",
         variant: "destructive",
       })
@@ -84,9 +83,9 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <UserPlus className="h-5 w-5" />
-          Invite Players
+          Invite Player
         </CardTitle>
-        <CardDescription>Add new players to your campaign by entering their user ID</CardDescription>
+        <CardDescription>Add a new player to this campaign by entering their user ID.</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -95,17 +94,16 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
             <Input
               id="inviteeId"
               type="text"
-              placeholder="Enter user ID (e.g., user_123abc...)"
+              placeholder="Enter user ID (e.g., user_abc123)"
               value={inviteeId}
               onChange={(e) => setInviteeId(e.target.value)}
               disabled={isLoading}
-              className="font-mono text-sm"
+              className="w-full"
             />
-            <p className="text-xs text-muted-foreground">
-              You can find user IDs in your authentication provider dashboard
+            <p className="text-sm text-muted-foreground">
+              The user ID can be found in the user's profile or account settings.
             </p>
           </div>
-
           <Button type="submit" disabled={isLoading || !inviteeId.trim()} className="w-full">
             {isLoading ? (
               <>

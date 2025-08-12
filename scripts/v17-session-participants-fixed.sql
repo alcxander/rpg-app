@@ -36,7 +36,7 @@ ALTER TABLE public.session_participants ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Users can view session participants for sessions they're in" ON public.session_participants;
 DROP POLICY IF EXISTS "Session owners can manage participants" ON public.session_participants;
 
--- RLS Policies - Check what column actually exists in sessions table
+-- RLS Policies
 CREATE POLICY "Users can view session participants for sessions they're in" ON public.session_participants
   FOR SELECT USING (
     user_id = (SELECT auth.uid()::text)
@@ -56,7 +56,7 @@ GRANT ALL ON public.session_participants TO authenticated;
 GRANT ALL ON public.session_participants TO service_role;
 
 -- Populate existing session participants from sessions.participants JSONB
--- First check if sessions table has participants column
+-- Handle both string arrays and object arrays in participants column
 DO $$
 BEGIN
   IF EXISTS (
@@ -65,6 +65,8 @@ BEGIN
     AND column_name = 'participants' 
     AND table_schema = 'public'
   ) THEN
+    
+    -- First, handle simple string arrays (user IDs)
     INSERT INTO public.session_participants (session_id, user_id, role)
     SELECT 
       s.id as session_id,
@@ -74,6 +76,22 @@ BEGIN
     CROSS JOIN LATERAL jsonb_array_elements(COALESCE(s.participants, '[]'::jsonb)) AS participant(value)
     WHERE s.participants IS NOT NULL
       AND jsonb_typeof(s.participants) = 'array'
+      AND jsonb_typeof(participant.value) = 'string'
     ON CONFLICT (session_id, user_id) DO NOTHING;
+    
+    -- Then, handle object arrays with userId and role properties
+    INSERT INTO public.session_participants (session_id, user_id, role)
+    SELECT 
+      s.id as session_id,
+      (participant.value->>'userId')::text as user_id,
+      COALESCE((participant.value->>'role')::text, 'Player') as role
+    FROM public.sessions s
+    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(s.participants, '[]'::jsonb)) AS participant(value)
+    WHERE s.participants IS NOT NULL
+      AND jsonb_typeof(s.participants) = 'array'
+      AND jsonb_typeof(participant.value) = 'object'
+      AND participant.value ? 'userId'
+    ON CONFLICT (session_id, user_id) DO NOTHING;
+    
   END IF;
 END $$;

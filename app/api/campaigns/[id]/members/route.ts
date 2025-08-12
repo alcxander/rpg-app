@@ -2,11 +2,11 @@ import { type NextRequest, NextResponse } from "next/server"
 import { getAuth } from "@clerk/nextjs/server"
 import { createAdminClient } from "@/lib/supabaseAdmin"
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const reqId = Math.random().toString(36).substring(7)
-  const { id: campaignId } = params
 
   try {
+    const { id: campaignId } = await params
     console.log("[api/campaigns/members] GET start", { reqId, campaignId })
 
     const { userId } = await getAuth(request)

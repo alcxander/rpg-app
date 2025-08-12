@@ -12,7 +12,7 @@ import { Loader2, UserPlus } from "lucide-react"
 
 interface InviteUserFormProps {
   campaignId: string
-  onInviteSuccess?: () => void
+  onInviteSuccess?: (member: any) => void
 }
 
 export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormProps) {
@@ -54,23 +54,29 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
       if (data.already_member) {
         toast({
           title: "Already a member",
-          description: `${data.member.user?.name || data.member.user_id} is already a ${data.member.role} in this campaign.`,
+          description: `${data.member.user?.name || data.member.user_id} is already a member of this campaign`,
           variant: "default",
         })
       } else {
         toast({
           title: "Invitation sent!",
-          description: `${data.member.user?.name || data.member.user_id} has been added to the campaign as a ${data.member.role}.`,
+          description: `${data.member.user?.name || data.member.user_id} has been added to the campaign`,
           variant: "default",
         })
+
+        // Clear the form
         setInviteeId("")
-        onInviteSuccess?.()
+
+        // Notify parent component
+        if (onInviteSuccess) {
+          onInviteSuccess(data.member)
+        }
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error("Invite error:", error)
       toast({
         title: "Invitation failed",
-        description: error.message || "Failed to invite user. Please try again.",
+        description: error instanceof Error ? error.message : "An unexpected error occurred",
         variant: "destructive",
       })
     } finally {
@@ -85,7 +91,7 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
           <UserPlus className="h-5 w-5" />
           Invite Player
         </CardTitle>
-        <CardDescription>Add a new player to your campaign by entering their user ID.</CardDescription>
+        <CardDescription>Add a new player to your campaign by entering their user ID</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -94,24 +100,27 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
             <Input
               id="inviteeId"
               type="text"
-              placeholder="user_abc123..."
+              placeholder="Enter user ID (e.g., user_abc123...)"
               value={inviteeId}
               onChange={(e) => setInviteeId(e.target.value)}
               disabled={isLoading}
               className="font-mono text-sm"
             />
-            <p className="text-sm text-muted-foreground">Enter the Clerk user ID of the player you want to invite.</p>
+            <p className="text-xs text-muted-foreground">
+              You can find user IDs in your Clerk dashboard or ask the user to check their profile
+            </p>
           </div>
-          <Button type="submit" disabled={isLoading || !inviteeId.trim()}>
+
+          <Button type="submit" disabled={isLoading || !inviteeId.trim()} className="w-full">
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Inviting...
+                Sending invitation...
               </>
             ) : (
               <>
                 <UserPlus className="mr-2 h-4 w-4" />
-                Send Invitation
+                Invite Player
               </>
             )}
           </Button>

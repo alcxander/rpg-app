@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { getAuth } from "@clerk/nextjs/server"
-import { createAdminClient } from "@/lib/supabaseAdmin"
+import { createClient } from "@/lib/supabaseClient"
 
 export const runtime = "nodejs"
 
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const supabase = createAdminClient()
+    const supabase = createClient()
 
     // Get campaigns owned by user
     const { data: ownedCampaigns, error: ownedError } = await supabase
@@ -34,8 +34,8 @@ export async function GET(request: NextRequest) {
       .eq("owner_id", userId)
 
     if (ownedError) {
-      console.log("[api/campaigns] GET owned campaigns error", { reqId, error: ownedError.message })
-      throw ownedError
+      console.error("[api/campaigns] GET owned campaigns error", { reqId, error: ownedError })
+      return NextResponse.json({ error: "Failed to fetch owned campaigns" }, { status: 500 })
     }
 
     // Get campaigns where user is a member
@@ -45,56 +45,59 @@ export async function GET(request: NextRequest) {
         campaign_id,
         role,
         joined_at,
-        campaigns (*)
+        campaigns (
+          id,
+          name,
+          description,
+          owner_id,
+          settings,
+          created_at,
+          updated_at
+        )
       `)
       .eq("user_id", userId)
 
     if (memberError) {
-      console.log("[api/campaigns] GET member campaigns error", { reqId, error: memberError.message })
-      throw memberError
+      console.error("[api/campaigns] GET member campaigns error", { reqId, error: memberError })
+      return NextResponse.json({ error: "Failed to fetch member campaigns" }, { status: 500 })
     }
 
     // Combine and format results
     const allCampaigns = [
       // Owned campaigns
-      ...ownedCampaigns.map((campaign) => ({
+      ...(ownedCampaigns || []).map((campaign) => ({
         ...campaign,
         role: "Owner",
         joined_at: campaign.created_at,
       })),
       // Member campaigns
-      ...memberCampaigns
-        .filter((member) => member.campaigns) // Filter out null campaigns
-        .map((member) => ({
-          ...member.campaigns,
-          role: member.role,
-          joined_at: member.joined_at,
-        })),
+      ...(memberCampaigns || []).map((member) => ({
+        ...member.campaigns,
+        role: member.role,
+        joined_at: member.joined_at,
+      })),
     ]
 
-    // Remove duplicates (in case user is both owner and member)
-    const uniqueCampaigns = allCampaigns.filter(
-      (campaign, index, self) => index === self.findIndex((c) => c.id === campaign.id),
-    )
-
-    // Sort by creation date
-    uniqueCampaigns.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    // Remove duplicates and sort by creation date
+    const uniqueCampaigns = allCampaigns
+      .filter((campaign, index, self) => index === self.findIndex((c) => c.id === campaign.id))
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
     console.log("[api/campaigns] GET success", {
       reqId,
       userId,
-      ownedCount: ownedCampaigns.length,
-      memberCount: memberCampaigns.length,
+      ownedCount: ownedCampaigns?.length || 0,
+      memberCount: memberCampaigns?.length || 0,
       totalCount: uniqueCampaigns.length,
     })
 
     return NextResponse.json(uniqueCampaigns)
-  } catch (error: any) {
-    console.log("[api/campaigns] GET error", {
+  } catch (error) {
+    console.error("[api/campaigns] GET error", {
       reqId,
-      error: error.message || error.toString(),
+      error: error instanceof Error ? error.message : String(error),
     })
-    return NextResponse.json({ error: "Failed to fetch campaigns" }, { status: 500 })
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
 
@@ -106,42 +109,42 @@ export async function POST(request: NextRequest) {
   const reqId = rid()
 
   try {
+    console.log("[api/campaigns] POST start", { reqId })
+
     const { userId } = await getAuth(request)
 
     if (!userId) {
+      console.log("[api/campaigns] POST unauthorized", { reqId })
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
     const body = await request.json()
-    const { name, description } = body
+    const { name, description, settings } = body
 
     if (!name) {
       return NextResponse.json({ error: "Campaign name is required" }, { status: 400 })
     }
 
-    const supabase = createAdminClient()
+    const supabase = createClient()
 
-    // Create campaign
+    // Create the campaign
     const { data: campaign, error: campaignError } = await supabase
       .from("campaigns")
       .insert({
         name,
         description: description || "",
         owner_id: userId,
-        settings: {
-          players: [],
-          shop_enabled: false,
-        },
+        settings: settings || {},
       })
       .select()
       .single()
 
     if (campaignError) {
-      console.log("[api/campaigns] POST campaign error", { reqId, error: campaignError.message })
-      throw campaignError
+      console.error("[api/campaigns] POST campaign creation error", { reqId, error: campaignError })
+      return NextResponse.json({ error: "Failed to create campaign" }, { status: 500 })
     }
 
-    // Add owner as campaign member
+    // Add the owner as a member with Owner role
     const { error: memberError } = await supabase.from("campaign_members").insert({
       campaign_id: campaign.id,
       user_id: userId,
@@ -150,18 +153,22 @@ export async function POST(request: NextRequest) {
     })
 
     if (memberError) {
-      console.log("[api/campaigns] POST member error", { reqId, error: memberError.message })
-      // Don't throw - campaign is created, member record is nice-to-have
+      console.error("[api/campaigns] POST member creation error", { reqId, error: memberError })
+      // Don't fail the request, just log the error
     }
 
     console.log("[api/campaigns] POST success", { reqId, campaignId: campaign.id })
 
-    return NextResponse.json(campaign, { status: 201 })
-  } catch (error: any) {
-    console.log("[api/campaigns] POST error", {
-      reqId,
-      error: error.message || error.toString(),
+    return NextResponse.json({
+      ...campaign,
+      role: "Owner",
+      joined_at: campaign.created_at,
     })
-    return NextResponse.json({ error: "Failed to create campaign" }, { status: 500 })
+  } catch (error) {
+    console.error("[api/campaigns] POST error", {
+      reqId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

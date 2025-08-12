@@ -2,33 +2,47 @@
 
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Users, Crown, Shield, User } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { Loader2, Users, Crown, Shield, User, Trash2 } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/dialog"
 
 interface CampaignMember {
   id: string
   user_id: string
-  role: "Owner" | "DM" | "Player"
+  role: string
   joined_at: string
   added_by?: string
   users?: {
     id: string
-    email?: string
     name?: string
-    image_url?: string
+    email?: string
+    avatar_url?: string
   }
 }
 
 interface CampaignMembersListProps {
   campaignId: string
+  isOwner: boolean
   refreshTrigger?: number
 }
 
-export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMembersListProps) {
+export function CampaignMembersList({ campaignId, isOwner, refreshTrigger }: CampaignMembersListProps) {
   const [members, setMembers] = useState<CampaignMember[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [removingMemberId, setRemovingMemberId] = useState<string | null>(null)
   const { toast } = useToast()
 
   const fetchMembers = async () => {
@@ -41,7 +55,7 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
 
       const data = await response.json()
       setMembers(data)
-    } catch (error: any) {
+    } catch (error) {
       console.error("Failed to fetch members:", error)
       toast({
         title: "Error",
@@ -50,6 +64,39 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
       })
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const removeMember = async (memberUserId: string) => {
+    setRemovingMemberId(memberUserId)
+
+    try {
+      const response = await fetch(`/api/campaigns/${campaignId}/members?userId=${memberUserId}`, {
+        method: "DELETE",
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || "Failed to remove member")
+      }
+
+      toast({
+        title: "Member removed",
+        description: "The member has been removed from the campaign",
+        variant: "default",
+      })
+
+      // Refresh the members list
+      await fetchMembers()
+    } catch (error) {
+      console.error("Failed to remove member:", error)
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to remove member",
+        variant: "destructive",
+      })
+    } finally {
+      setRemovingMemberId(null)
     }
   }
 
@@ -90,7 +137,8 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-center py-8">
-            <div className="text-muted-foreground">Loading members...</div>
+            <Loader2 className="h-6 w-6 animate-spin" />
+            <span className="ml-2">Loading members...</span>
           </div>
         </CardContent>
       </Card>
@@ -109,42 +157,73 @@ export function CampaignMembersList({ campaignId, refreshTrigger }: CampaignMemb
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="space-y-4">
-          {members.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              No members found. Start by inviting some players!
-            </div>
-          ) : (
-            members.map((member) => (
+        {members.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+            <p>No members found</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {members.map((member) => (
               <div key={member.id} className="flex items-center justify-between p-4 border rounded-lg">
                 <div className="flex items-center gap-3">
-                  <Avatar className="h-10 w-10">
-                    <AvatarImage
-                      src={member.users?.image_url || "/placeholder.svg"}
-                      alt={member.users?.name || member.user_id}
-                    />
+                  <Avatar>
+                    <AvatarImage src={member.users?.avatar_url || "/placeholder.svg"} />
                     <AvatarFallback>
                       {member.users?.name?.charAt(0) || member.user_id.charAt(0).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
+
                   <div>
-                    <div className="font-medium">{member.users?.name || member.user_id}</div>
-                    {member.users?.email && <div className="text-sm text-muted-foreground">{member.users.email}</div>}
-                    <div className="text-xs text-muted-foreground">
-                      Joined {new Date(member.joined_at).toLocaleDateString()}
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium">{member.users?.name || member.user_id}</p>
+                      <Badge className={getRoleColor(member.role)}>
+                        {getRoleIcon(member.role)}
+                        <span className="ml-1">{member.role}</span>
+                      </Badge>
                     </div>
+                    {member.users?.email && <p className="text-sm text-muted-foreground">{member.users.email}</p>}
+                    <p className="text-xs text-muted-foreground">
+                      Joined {new Date(member.joined_at).toLocaleDateString()}
+                    </p>
                   </div>
                 </div>
-                <Badge variant="outline" className={getRoleColor(member.role)}>
-                  <span className="flex items-center gap-1">
-                    {getRoleIcon(member.role)}
-                    {member.role}
-                  </span>
-                </Badge>
+
+                {isOwner && member.role !== "Owner" && (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="outline" size="sm" disabled={removingMemberId === member.user_id}>
+                        {removingMemberId === member.user_id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Remove Member</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Are you sure you want to remove {member.users?.name || member.user_id} from this campaign?
+                          This action cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={() => removeMember(member.user_id)}
+                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        >
+                          Remove Member
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
               </div>
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   )

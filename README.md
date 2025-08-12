@@ -5,31 +5,23 @@ A real-time tabletop RPG collaboration platform built with Next.js, Supabase, an
 ## Features
 
 - **Campaign Management**: Create and manage RPG campaigns
-- **Player Invites**: Invite players to join campaigns with proper membership tracking
-- **Character System**: Create and manage characters with stats, inventory, and gold
-- **Interactive Maps**: Drag-and-drop token system with ownership permissions
-- **Shop System**: DM-controlled shops with purchase transactions
-- **Real-time Updates**: Live synchronization across all connected clients
-
-## Tech Stack
-
-- **Frontend**: Next.js 15 (App Router), React, Tailwind CSS, shadcn/ui
-- **Backend**: Next.js API Routes, Supabase (PostgreSQL + Realtime)
-- **Authentication**: Clerk
-- **Testing**: Vitest, Playwright (E2E)
+- **Real-time Sessions**: Live collaboration with maps, tokens, and chat
+- **Character System**: Create and manage characters with stats and inventory
+- **Shop System**: In-game shops with inventory management
+- **Battle System**: Initiative tracking and combat management
+- **Invite System**: Invite players to campaigns with proper permissions
 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js 18+ 
-- npm or yarn
 - Supabase account
 - Clerk account
 
 ### Environment Variables
 
-Create a `.env.local` file with:
+Create a `.env.local` file with the following variables:
 
 \`\`\`env
 # Supabase
@@ -45,175 +37,226 @@ NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
 NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=/
 NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=/
 
-# Optional: AI/Image Generation
-OPENAI_API_KEY=your_openai_key
-STABILITY_API_KEY=your_stability_key
+# OpenAI (for AI features)
+OPENAI_API_KEY=your_openai_api_key
+
+# Stability AI (for image generation)
+STABILITY_API_KEY=your_stability_api_key
+\`\`\`
+
+### Database Setup
+
+1. Run the database migrations in order:
+
+\`\`\`bash
+# Run migrations in your Supabase SQL editor
+# Execute each file in order:
+scripts/init-db.sql
+scripts/v2-add-messages.sql
+scripts/v3-add-background.sql
+scripts/v4-battles-name.sql
+scripts/v5-battles-background.sql
+scripts/v6-battles-update.sql
+scripts/v7-battles-initiative.sql
+scripts/v8-sessions-uuid.sql
+scripts/v9-shopkeepers.sql
+scripts/v10-shopkeepers-removed.sql
+scripts/v11-add-image-url.sql
+scripts/v12-fix-shopkeeper-tables.sql
+scripts/v13-add-quantity-and-rls.sql
+
+# New migrations for invite system:
+scripts/v14-campaign-members.sql
+scripts/v15-characters.sql
+scripts/v16-token-ownership.sql
+scripts/v17-session-participants.sql
+scripts/v18-players-gold-unique.sql
+\`\`\`
+
+2. Seed test data (optional):
+
+\`\`\`bash
+npm run seed-test-data
 \`\`\`
 
 ### Installation
 
-1. **Clone and install dependencies:**
-   \`\`\`bash
-   git clone <repository-url>
-   cd rpg-app
-   npm install
-   \`\`\`
+1. Clone the repository
+2. Install dependencies:
 
-2. **Run database migrations:**
-   \`\`\`bash
-   # Execute each migration file in order in your Supabase SQL editor:
-   # scripts/v14-campaign-members.sql
-   # scripts/v15-characters.sql  
-   # scripts/v16-token-ownership.sql
-   # scripts/v17-session-participants.sql
-   # scripts/v18-players-gold-unique.sql
-   \`\`\`
+\`\`\`bash
+npm install
+\`\`\`
 
-3. **Seed test data (optional):**
-   \`\`\`bash
-   npm run seed-test-data
-   \`\`\`
+3. Run the development server:
 
-4. **Start development server:**
-   \`\`\`bash
-   npm run dev
-   \`\`\`
+\`\`\`bash
+npm run dev
+\`\`\`
 
-5. **Open [http://localhost:3000](http://localhost:3000)**
+4. Open [http://localhost:3000](http://localhost:3000) in your browser
 
 ## Testing
 
 ### Unit Tests
 
-Run API and component unit tests:
+Run the test suite:
 
 \`\`\`bash
-# Run all tests
 npm test
-
-# Run tests in watch mode
-npm run test:watch
-
-# Run tests with coverage
-npm run test:coverage
 \`\`\`
 
-### Manual Testing - Iteration 1 (Invite Flow)
-
-#### Prerequisites
-1. Run database migrations
-2. Seed test data: `npm run seed-test-data`
-3. Start dev server: `npm run dev`
-
-#### Test Cases
-
-**✅ Successful Invite Flow:**
-1. Sign in as DM (dm-user-123)
-2. Navigate to `/campaigns/test-campaign-123/settings`
-3. Go to "Invite Players" tab
-4. Enter user ID: `player-456`
-5. Click "Send Invite"
-6. **Expected**: Green success toast, user added to members list
-7. Check "Members" tab - should show Test Player 1
-
-**✅ Duplicate Invite Handling:**
-1. Try inviting `player-456` again
-2. **Expected**: "Already a member" toast (not an error)
-
-**✅ Non-existent User:**
-1. Try inviting `fake-user-999`
-2. **Expected**: Red error toast "User not found"
-
-**✅ Permission Validation:**
-1. Sign out and sign in as `player-456`
-2. Try accessing `/campaigns/test-campaign-123/settings`
-3. **Expected**: Access denied or redirect
-
-**✅ Database Verification:**
-Check Supabase tables after successful invite:
-- `campaign_members`: New row for player-456
-- `players_gold`: Row exists for player-456 + campaign
-- `session_participants`: Player added to active sessions
-
-### Edge Cases Discovered & Mitigated
-
-1. **Concurrent Invites**: Using `ON CONFLICT DO NOTHING` prevents duplicate key errors
-2. **Orphaned Data**: CASCADE foreign keys clean up related data
-3. **Permission Edge Cases**: Dual validation (campaign owner + member role)
-4. **Realtime Failures**: Non-blocking realtime events don't fail the request
-5. **Legacy Compatibility**: Updates both normalized tables and JSONB fields
-
-### API Testing with curl
+Run tests in watch mode:
 
 \`\`\`bash
-# Test invite endpoint (replace with actual auth token)
-curl -X POST http://localhost:3000/api/campaigns/test-campaign-123/invite \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_CLERK_TOKEN" \
-  -d '{"inviteeId": "player-789"}'
-
-# Test members endpoint  
-curl http://localhost:3000/api/campaigns/test-campaign-123/members \
-  -H "Authorization: Bearer YOUR_CLERK_TOKEN"
+npm run test:watch
 \`\`\`
 
-## Database Schema
+### Manual Testing - Invite Flow
 
-### New Tables (Iteration 1)
+1. **Setup Test Data**:
+   \`\`\`bash
+   npm run seed-test-data
+   \`\`\`
 
-- **campaign_members**: Explicit campaign membership with roles
-- **characters**: Player characters with stats, HP, gold, and inventory
-- **character_inventories**: Per-character item storage
-- **session_participants**: Normalized session membership
-- **Enhanced tokens**: Added ownership and position tracking
+2. **Test Successful Invite**:
+   - Login as DM (test-dm-user)
+   - Navigate to `/campaigns/test-campaign-id/settings`
+   - Go to "Invite Players" tab
+   - Enter `test-player-1` in the user ID field
+   - Click "Send Invite"
+   - Should see green success toast
+   - Check "Members" tab to see the new member
 
-### Key Relationships
+3. **Test Duplicate Invite**:
+   - Try inviting `test-player-1` again
+   - Should see "Already a member" message
 
-\`\`\`
-campaigns (1) -> (*) campaign_members -> (*) users
-campaigns (1) -> (*) characters -> (*) character_inventories  
-characters (1) -> (*) tokens (controlled_by_character_id)
-sessions (1) -> (*) session_participants -> (*) users
-sessions (1) -> (*) tokens
-\`\`\`
+4. **Test Invalid User**:
+   - Try inviting `non-existent-user`
+   - Should see red error toast "User not found"
 
-## Security Model
+5. **Test Permission Validation**:
+   - Login as a regular player
+   - Try to access campaign settings
+   - Should be denied access
 
-- **Authentication**: Clerk handles user auth and session management
-- **Authorization**: Row Level Security (RLS) policies on all tables
-- **Campaign Access**: Only owners and members can access campaign data
-- **Token Ownership**: Players can only move their own tokens (DMs can move any)
-- **Shop Permissions**: Only DMs can toggle shop visibility and grant gold
+### Manual Testing Checklist
 
-## Realtime Events
+- [ ] DM can invite players successfully
+- [ ] Duplicate invites show appropriate message
+- [ ] Invalid user IDs show error
+- [ ] Non-owners cannot invite players
+- [ ] Invited players appear in members list
+- [ ] Real-time updates work (test with multiple browser tabs)
+- [ ] Database integrity maintained (check campaign_members table)
+- [ ] Session participants updated correctly
+- [ ] Gold records created for new members
 
-### Channels
-- `campaign:{campaignId}` - Campaign-level events (member added, shop toggled)
-- `session:{sessionId}` - Session events (token moved, battle started)
-- `user:{userId}` - User-specific events (gold granted)
+## API Endpoints
 
-### Event Types
-- `CAMPAIGN_MEMBER_ADDED` - New player joined campaign
-- `TOKEN_MOVED` - Token position updated
-- `SHOP_PURCHASE` - Item purchased from shop
-- `GOLD_UPDATED` - Player gold balance changed
+### Campaign Management
 
-## Next Steps - Iteration 2
+- `POST /api/campaigns/:id/invite` - Invite user to campaign
+- `GET /api/campaigns/:id/members` - Get campaign members
 
-- [ ] Character creation and management UI
-- [ ] Token spawning from characters  
-- [ ] Draggable canvas map with Fabric.js
-- [ ] Token ownership and movement permissions
-- [ ] Real-time token synchronization
+### Characters (Coming in Iteration 2)
+
+- `POST /api/characters` - Create character
+- `GET /api/users/:userId/characters` - Get user's characters
+- `POST /api/sessions/:sessionId/characters/:characterId/spawn` - Spawn character token
+
+### Tokens (Coming in Iteration 2)
+
+- `POST /api/sessions/:sessionId/tokens/:tokenId/move` - Move token
+- `DELETE /api/sessions/:sessionId/tokens/:tokenId` - Remove token
+
+### Shops (Coming in Iteration 3)
+
+- `POST /api/campaigns/:id/shop-toggle` - Toggle shop visibility
+- `POST /api/shops/:shopId/buy` - Purchase item
+- `POST /api/campaigns/:id/give-gold` - DM give gold to player
+
+## Architecture
+
+### Database Schema
+
+- **campaigns**: Campaign information
+- **campaign_members**: Explicit campaign membership
+- **users**: User profiles
+- **sessions**: Game sessions
+- **session_participants**: Session membership
+- **characters**: Player characters
+- **character_inventories**: Character items
+- **tokens**: Map tokens with ownership
+- **players_gold**: Gold tracking per player/campaign
+
+### Real-time Events
+
+- **campaign:{campaignId}**: Campaign-level events (member added, shop toggled)
+- **session:{sessionId}**: Session-level events (token moved, battle started)
+- **user:{userId}**: User-specific events (gold granted)
+
+## Development
+
+### Code Structure
+
+- `/app` - Next.js App Router pages and API routes
+- `/components` - Reusable React components
+- `/lib` - Utility functions and configurations
+- `/hooks` - Custom React hooks
+- `/scripts` - Database migrations and seed scripts
+- `/types` - TypeScript type definitions
+
+### Testing Strategy
+
+- **Unit Tests**: API endpoints and utility functions
+- **Integration Tests**: Database operations and real-time events
+- **Manual QA**: User flows and edge cases
+- **E2E Tests**: Complete user journeys (Iteration 3)
+
+## Deployment
+
+1. Deploy to Vercel or similar platform
+2. Set environment variables in deployment platform
+3. Run database migrations in production Supabase
+4. Configure Clerk production settings
+5. Test invite flow in production environment
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make changes with tests
-4. Run the test suite
-5. Submit a pull request
+1. Create feature branch from main
+2. Implement changes with tests
+3. Run test suite and manual QA
+4. Submit PR with migration files and documentation
+5. Deploy after review and approval
 
-## License
+## Troubleshooting
 
-MIT License - see LICENSE file for details
+### Common Issues
+
+1. **"Clerk can't detect usage of clerkMiddleware()"**
+   - Ensure middleware.ts is properly configured
+   - Check that API routes use correct auth imports
+
+2. **"Different slug names for the same dynamic path"**
+   - Ensure consistent route naming ([id] vs [campaignId])
+   - Check for conflicting route files
+
+3. **Database connection errors**
+   - Verify Supabase environment variables
+   - Check RLS policies are properly configured
+
+4. **Real-time events not working**
+   - Verify Supabase real-time is enabled
+   - Check channel subscriptions and event names
+
+### Debug Mode
+
+Enable debug logging by setting:
+
+\`\`\`env
+NODE_ENV=development
+\`\`\`
+
+This will show detailed API request/response logs in the console.

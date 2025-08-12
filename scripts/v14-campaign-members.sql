@@ -1,4 +1,6 @@
--- 014_create_campaign_members.sql
+-- Migration: Add campaign_members table for explicit membership tracking
+-- This fixes the invite flow by creating proper campaign membership records
+
 CREATE TABLE IF NOT EXISTS public.campaign_members (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   campaign_id uuid NOT NULL,
@@ -15,21 +17,32 @@ CREATE TABLE IF NOT EXISTS public.campaign_members (
 -- Enable RLS
 ALTER TABLE public.campaign_members ENABLE ROW LEVEL SECURITY;
 
--- Policy: Users can see campaign members for campaigns they belong to
-CREATE POLICY "Users can view campaign members for their campaigns" ON public.campaign_members
+-- RLS Policies
+CREATE POLICY "Users can view campaign members for campaigns they belong to" ON public.campaign_members
   FOR SELECT USING (
-    user_id = auth.jwt() ->> 'sub' OR
+    user_id = auth.uid() OR 
     campaign_id IN (
-      SELECT campaign_id FROM public.campaign_members 
-      WHERE user_id = auth.jwt() ->> 'sub'
+      SELECT id FROM public.campaigns WHERE owner_id = auth.uid()
+    ) OR
+    campaign_id IN (
+      SELECT campaign_id FROM public.campaign_members WHERE user_id = auth.uid()
     )
   );
 
--- Policy: Campaign owners can manage members
-CREATE POLICY "Campaign owners can manage members" ON public.campaign_members
-  FOR ALL USING (
+CREATE POLICY "Campaign owners can insert members" ON public.campaign_members
+  FOR INSERT WITH CHECK (
     campaign_id IN (
-      SELECT id FROM public.campaigns 
-      WHERE owner_id = auth.jwt() ->> 'sub'
+      SELECT id FROM public.campaigns WHERE owner_id = auth.uid()
     )
   );
+
+CREATE POLICY "Campaign owners can delete members" ON public.campaign_members
+  FOR DELETE USING (
+    campaign_id IN (
+      SELECT id FROM public.campaigns WHERE owner_id = auth.uid()
+    )
+  );
+
+-- Create indexes for performance
+CREATE INDEX IF NOT EXISTS idx_campaign_members_campaign_id ON public.campaign_members(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_campaign_members_user_id ON public.campaign_members(user_id);

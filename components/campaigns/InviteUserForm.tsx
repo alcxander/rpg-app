@@ -26,7 +26,7 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
     if (!inviteeId.trim()) {
       toast({
         title: "Error",
-        description: "Please enter a user ID",
+        description: "Please enter a user ID to invite",
         variant: "destructive",
       })
       return
@@ -60,18 +60,17 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
       } else {
         toast({
           title: "Success!",
-          description: `User ${data.member?.user?.name || inviteeId} has been invited to the campaign`,
+          description: `User has been invited to the campaign`,
           variant: "default",
         })
+        setInviteeId("")
         onInviteSuccess?.()
       }
-
-      setInviteeId("")
     } catch (error) {
       console.error("Invite error:", error)
       toast({
         title: "Invite failed",
-        description: error instanceof Error ? error.message : "An unexpected error occurred",
+        description: error instanceof Error ? error.message : "Failed to invite user",
         variant: "destructive",
       })
     } finally {
@@ -102,7 +101,7 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
               required
             />
           </div>
-          <Button type="submit" className="w-full" disabled={isLoading || !inviteeId.trim()}>
+          <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />

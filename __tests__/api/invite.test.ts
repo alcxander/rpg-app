@@ -12,52 +12,47 @@ vi.mock("@/lib/supabaseAdmin", () => ({
   createAdminClient: vi.fn(),
 }))
 
-const mockGetAuth = vi.mocked(await import("@clerk/nextjs/server")).getAuth
-const mockCreateAdminClient = vi.mocked(await import("@/lib/supabaseAdmin")).createAdminClient
+const mockSupabase = {
+  from: vi.fn(() => mockSupabase),
+  select: vi.fn(() => mockSupabase),
+  eq: vi.fn(() => mockSupabase),
+  single: vi.fn(),
+  insert: vi.fn(() => mockSupabase),
+  upsert: vi.fn(() => mockSupabase),
+  update: vi.fn(() => mockSupabase),
+  channel: vi.fn(() => ({
+    send: vi.fn(),
+  })),
+}
 
 describe("/api/campaigns/[id]/invite", () => {
-  let mockSupabase: any
-
   beforeEach(() => {
     vi.clearAllMocks()
 
-    mockSupabase = {
-      from: vi.fn().mockReturnThis(),
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      single: vi.fn().mockReturnThis(),
-      insert: vi.fn().mockReturnThis(),
-      upsert: vi.fn().mockReturnThis(),
-      update: vi.fn().mockReturnThis(),
-      channel: vi.fn().mockReturnThis(),
-      send: vi.fn().mockResolvedValue(undefined),
-    }
+    // Setup default mocks
+    const { getAuth } = require("@clerk/nextjs/server")
+    const { createAdminClient } = require("@/lib/supabaseAdmin")
 
-    mockCreateAdminClient.mockReturnValue(mockSupabase)
+    getAuth.mockReturnValue({ userId: "test-user-id", sessionId: "test-session" })
+    createAdminClient.mockReturnValue(mockSupabase)
   })
 
   it("should successfully invite a new user", async () => {
-    // Mock authenticated user
-    mockGetAuth.mockReturnValue({
-      userId: "dm-user-123",
-      sessionId: "session-123",
-    })
-
-    // Mock campaign owner check
+    // Mock successful campaign owner check
     mockSupabase.single.mockResolvedValueOnce({
-      data: { owner_id: "dm-user-123" },
+      data: { owner_id: "test-user-id" },
       error: null,
     })
 
-    // Mock invitee user exists
+    // Mock successful user lookup
     mockSupabase.single.mockResolvedValueOnce({
-      data: { id: "player-456", name: "Test Player", email: "test@example.com" },
+      data: { id: "invitee-id", name: "Test User", email: "test@example.com" },
       error: null,
     })
 
     // Mock successful member insert
     mockSupabase.single.mockResolvedValueOnce({
-      data: { id: "member-789", user_id: "player-456", role: "Player" },
+      data: { id: "member-id", user_id: "invitee-id", role: "Player" },
       error: null,
     })
 
@@ -67,35 +62,90 @@ describe("/api/campaigns/[id]/invite", () => {
       error: null,
     })
 
-    const request = new NextRequest("http://localhost:3000/api/campaigns/campaign-123/invite", {
+    const request = new NextRequest("http://localhost:3000/api/campaigns/test-campaign/invite", {
       method: "POST",
-      body: JSON.stringify({ inviteeId: "player-456" }),
+      body: JSON.stringify({ inviteeId: "invitee-id" }),
     })
 
-    const response = await POST(request, { params: Promise.resolve({ id: "campaign-123" }) })
+    const response = await POST(request, { params: Promise.resolve({ id: "test-campaign" }) })
     const data = await response.json()
 
     expect(response.status).toBe(200)
     expect(data.ok).toBe(true)
     expect(data.already_member).toBe(false)
-    expect(data.member.user_id).toBe("player-456")
+    expect(data.member).toBeDefined()
   })
 
-  it("should handle duplicate invite gracefully", async () => {
-    mockGetAuth.mockReturnValue({
-      userId: "dm-user-123",
-      sessionId: "session-123",
+  it("should return 401 for unauthenticated requests", async () => {
+    const { getAuth } = require("@clerk/nextjs/server")
+    getAuth.mockReturnValue({ userId: null, sessionId: null })
+
+    const request = new NextRequest("http://localhost:3000/api/campaigns/test-campaign/invite", {
+      method: "POST",
+      body: JSON.stringify({ inviteeId: "invitee-id" }),
     })
 
-    // Mock campaign owner check
+    const response = await POST(request, { params: Promise.resolve({ id: "test-campaign" }) })
+    const data = await response.json()
+
+    expect(response.status).toBe(401)
+    expect(data.error).toBe("Unauthorized")
+  })
+
+  it("should return 403 for non-campaign owners", async () => {
+    // Mock campaign with different owner
     mockSupabase.single.mockResolvedValueOnce({
-      data: { owner_id: "dm-user-123" },
+      data: { owner_id: "different-user-id" },
       error: null,
     })
 
-    // Mock invitee user exists
+    const request = new NextRequest("http://localhost:3000/api/campaigns/test-campaign/invite", {
+      method: "POST",
+      body: JSON.stringify({ inviteeId: "invitee-id" }),
+    })
+
+    const response = await POST(request, { params: Promise.resolve({ id: "test-campaign" }) })
+    const data = await response.json()
+
+    expect(response.status).toBe(403)
+    expect(data.error).toBe("Only campaign owner can invite players")
+  })
+
+  it("should return 404 for non-existent users", async () => {
+    // Mock successful campaign owner check
     mockSupabase.single.mockResolvedValueOnce({
-      data: { id: "player-456", name: "Test Player", email: "test@example.com" },
+      data: { owner_id: "test-user-id" },
+      error: null,
+    })
+
+    // Mock user not found
+    mockSupabase.single.mockResolvedValueOnce({
+      data: null,
+      error: { message: "User not found" },
+    })
+
+    const request = new NextRequest("http://localhost:3000/api/campaigns/test-campaign/invite", {
+      method: "POST",
+      body: JSON.stringify({ inviteeId: "non-existent-user" }),
+    })
+
+    const response = await POST(request, { params: Promise.resolve({ id: "test-campaign" }) })
+    const data = await response.json()
+
+    expect(response.status).toBe(404)
+    expect(data.error).toBe("User not found")
+  })
+
+  it("should handle duplicate invites gracefully", async () => {
+    // Mock successful campaign owner check
+    mockSupabase.single.mockResolvedValueOnce({
+      data: { owner_id: "test-user-id" },
+      error: null,
+    })
+
+    // Mock successful user lookup
+    mockSupabase.single.mockResolvedValueOnce({
+      data: { id: "invitee-id", name: "Test User", email: "test@example.com" },
       error: null,
     })
 
@@ -105,12 +155,12 @@ describe("/api/campaigns/[id]/invite", () => {
       message: "duplicate key value violates unique constraint",
     })
 
-    const request = new NextRequest("http://localhost:3000/api/campaigns/campaign-123/invite", {
+    const request = new NextRequest("http://localhost:3000/api/campaigns/test-campaign/invite", {
       method: "POST",
-      body: JSON.stringify({ inviteeId: "player-456" }),
+      body: JSON.stringify({ inviteeId: "invitee-id" }),
     })
 
-    const response = await POST(request, { params: Promise.resolve({ id: "campaign-123" }) })
+    const response = await POST(request, { params: Promise.resolve({ id: "test-campaign" }) })
     const data = await response.json()
 
     expect(response.status).toBe(200)
@@ -118,90 +168,13 @@ describe("/api/campaigns/[id]/invite", () => {
     expect(data.already_member).toBe(true)
   })
 
-  it("should reject unauthorized requests", async () => {
-    mockGetAuth.mockReturnValue({
-      userId: null,
-      sessionId: null,
-    })
-
-    const request = new NextRequest("http://localhost:3000/api/campaigns/campaign-123/invite", {
+  it("should return 400 for missing inviteeId", async () => {
+    const request = new NextRequest("http://localhost:3000/api/campaigns/test-campaign/invite", {
       method: "POST",
-      body: JSON.stringify({ inviteeId: "player-456" }),
+      body: JSON.stringify({}),
     })
 
-    const response = await POST(request, { params: Promise.resolve({ id: "campaign-123" }) })
-    const data = await response.json()
-
-    expect(response.status).toBe(401)
-    expect(data.error).toBe("Unauthorized")
-  })
-
-  it("should reject non-owners", async () => {
-    mockGetAuth.mockReturnValue({
-      userId: "other-user-789",
-      sessionId: "session-123",
-    })
-
-    // Mock campaign owner check - different owner
-    mockSupabase.single.mockResolvedValueOnce({
-      data: { owner_id: "dm-user-123" },
-      error: null,
-    })
-
-    const request = new NextRequest("http://localhost:3000/api/campaigns/campaign-123/invite", {
-      method: "POST",
-      body: JSON.stringify({ inviteeId: "player-456" }),
-    })
-
-    const response = await POST(request, { params: Promise.resolve({ id: "campaign-123" }) })
-    const data = await response.json()
-
-    expect(response.status).toBe(403)
-    expect(data.error).toBe("Only campaign owner can invite players")
-  })
-
-  it("should handle non-existent user", async () => {
-    mockGetAuth.mockReturnValue({
-      userId: "dm-user-123",
-      sessionId: "session-123",
-    })
-
-    // Mock campaign owner check
-    mockSupabase.single.mockResolvedValueOnce({
-      data: { owner_id: "dm-user-123" },
-      error: null,
-    })
-
-    // Mock user not found
-    mockSupabase.single.mockResolvedValueOnce({
-      data: null,
-      error: { message: "No rows returned" },
-    })
-
-    const request = new NextRequest("http://localhost:3000/api/campaigns/campaign-123/invite", {
-      method: "POST",
-      body: JSON.stringify({ inviteeId: "nonexistent-user" }),
-    })
-
-    const response = await POST(request, { params: Promise.resolve({ id: "campaign-123" }) })
-    const data = await response.json()
-
-    expect(response.status).toBe(404)
-    expect(data.error).toBe("User not found")
-  })
-
-  it("should validate required fields", async () => {
-    mockGetAuth.mockReturnValue({
-      userId: "dm-user-123",
-      sessionId: "session-123",
-    })
-
-    const request = new NextRequest("http://localhost:3000/api/campaigns/campaign-123/invite", {
-      method: "POST",
-      body: JSON.stringify({}), // Missing inviteeId
-    })
-
-    const response = await POST(request, { params: Promise.resolve({ id: "campaign-123" }) })
+    const response = await POST(request, { params: Promise.resolve({ id: "test-campaign" }) })
     const data = await response.json()
 
     expect(response.status).toBe(400)

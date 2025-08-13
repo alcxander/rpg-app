@@ -1,30 +1,50 @@
--- Migration v19: Fix campaign_members RLS policies to avoid infinite recursion
+-- Fix infinite recursion in campaign_members RLS policies
 -- Drop existing policies that cause recursion
-DROP POLICY IF EXISTS "Users can view campaign members" ON public.campaign_members;
-DROP POLICY IF EXISTS "Campaign owners can insert members" ON public.campaign_members;
-DROP POLICY IF EXISTS "Campaign owners can update members" ON public.campaign_members;
-DROP POLICY IF EXISTS "Campaign owners can delete members" ON public.campaign_members;
+DROP POLICY IF EXISTS "Users can view campaign members for campaigns they own or are members of" ON campaign_members;
+DROP POLICY IF EXISTS "Campaign owners can manage members" ON campaign_members;
+DROP POLICY IF EXISTS "Users can view their own membership" ON campaign_members;
 
--- Create simpler RLS policies that don't cause recursion
--- Users can view members of campaigns they belong to
-CREATE POLICY "Members can view campaign members" ON public.campaign_members
-  FOR SELECT USING (
-    -- User can see members of campaigns they are a member of
-    campaign_id IN (
-      SELECT campaign_id FROM public.campaign_members WHERE user_id = (SELECT auth.uid()::text)
+-- Create simpler policies that don't cause recursion
+CREATE POLICY "Users can view campaign members" ON campaign_members
+  FOR SELECT
+  USING (
+    -- User is the campaign owner (direct check without recursion)
+    EXISTS (
+      SELECT 1 FROM campaigns 
+      WHERE campaigns.id = campaign_members.campaign_id 
+      AND campaigns.owner_id = auth.uid()::text
     )
     OR
-    -- Or if they own the campaign (direct check without join)
+    -- User is a member of the campaign
+    user_id = auth.uid()::text
+  );
+
+CREATE POLICY "Campaign owners can insert members" ON campaign_members
+  FOR INSERT
+  WITH CHECK (
     EXISTS (
-      SELECT 1 FROM public.campaigns 
+      SELECT 1 FROM campaigns 
       WHERE campaigns.id = campaign_members.campaign_id 
-      AND campaigns.owner_id = (SELECT auth.uid()::text)
+      AND campaigns.owner_id = auth.uid()::text
     )
   );
 
--- Only service role can insert/update/delete members (we'll handle this in API)
-CREATE POLICY "Service role can manage members" ON public.campaign_members
-  FOR ALL USING (auth.role() = 'service_role');
+CREATE POLICY "Campaign owners can update members" ON campaign_members
+  FOR UPDATE
+  USING (
+    EXISTS (
+      SELECT 1 FROM campaigns 
+      WHERE campaigns.id = campaign_members.campaign_id 
+      AND campaigns.owner_id = auth.uid()::text
+    )
+  );
 
--- Grant necessary permissions
-GRANT ALL ON public.campaign_members TO service_role;
+CREATE POLICY "Campaign owners can delete members" ON campaign_members
+  FOR DELETE
+  USING (
+    EXISTS (
+      SELECT 1 FROM campaigns 
+      WHERE campaigns.id = campaign_members.campaign_id 
+      AND campaigns.owner_id = auth.uid()::text
+    )
+  );

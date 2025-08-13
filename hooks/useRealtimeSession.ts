@@ -1,104 +1,98 @@
 "use client"
 
 import { useState, useRef, useCallback } from "react"
-import { useUser } from "@clerk/nextjs"
+import { useAuth } from "@clerk/nextjs"
 import { createBrowserClientWithToken } from "@/lib/supabaseClient"
 import type { RealtimeChannel } from "@supabase/supabase-js"
 
-interface UseRealtimeSessionProps {
-  sessionId: string | null
+interface UseRealtimeSessionReturn {
+  isConnected: boolean
+  error: string | null
+  joinSession: (sessionId: string) => Promise<void>
+  leaveSession: () => void
 }
 
-export function useRealtimeSession({ sessionId }: UseRealtimeSessionProps) {
-  const { user } = useUser()
+export function useRealtimeSession(): UseRealtimeSessionReturn {
+  const { getToken } = useAuth()
   const [isConnected, setIsConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const channelRef = useRef<RealtimeChannel | null>(null)
 
-  const joinSession = async () => {
-    if (!sessionId) {
-      setError("No session ID provided")
-      return
-    }
-
-    if (!user) {
-      setError("User not authenticated")
-      return
-    }
-
-    try {
-      setError(null)
-
-      // Create Supabase client with user token
-      const supabase = await createBrowserClientWithToken()
-      if (!supabase) {
-        setError("Failed to create Supabase client")
+  const joinSession = useCallback(
+    async (sessionId: string) => {
+      if (!sessionId) {
+        setError("Session ID is required")
         return
       }
 
-      // Clean up existing channel
-      if (channelRef.current) {
-        await channelRef.current.unsubscribe()
-        channelRef.current = null
-      }
+      try {
+        setError(null)
 
-      // Join the session via API
-      const response = await fetch("/api/join-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, userId: user.id }),
-      })
+        // Get the Supabase token
+        const token = await getToken({ template: "supabase" })
+        if (!token) {
+          throw new Error("Failed to get authentication token")
+        }
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to join session")
-      }
+        // Create Supabase client with token
+        const supabase = createBrowserClientWithToken(token)
 
-      // Create realtime channel
-      const channel = supabase.channel(`session:${sessionId}`)
+        // Leave existing session if any
+        if (channelRef.current) {
+          await supabase.removeChannel(channelRef.current)
+          channelRef.current = null
+        }
 
-      channel
-        .on("presence", { event: "sync" }, () => {
-          console.log("Presence synced")
-        })
-        .on("presence", { event: "join" }, ({ key, newPresences }) => {
-          console.log("User joined:", key, newPresences)
-        })
-        .on("presence", { event: "leave" }, ({ key, leftPresences }) => {
-          console.log("User left:", key, leftPresences)
-        })
-        .subscribe(async (status) => {
-          if (status === "SUBSCRIBED") {
-            // Track presence
-            await channel.track({
-              user_id: user.id,
-              user_name: user.fullName || user.firstName || "Anonymous",
-              online_at: new Date().toISOString(),
-            })
+        // Join the session channel
+        const channel = supabase.channel(`session:${sessionId}`)
+
+        channel
+          .on("presence", { event: "sync" }, () => {
+            console.log("Presence synced")
             setIsConnected(true)
-            console.log("Successfully joined session:", sessionId)
-          } else if (status === "CHANNEL_ERROR") {
-            setError("Failed to connect to session")
-            setIsConnected(false)
-          }
-        })
+          })
+          .on("presence", { event: "join" }, ({ key, newPresences }) => {
+            console.log("User joined:", key, newPresences)
+          })
+          .on("presence", { event: "leave" }, ({ key, leftPresences }) => {
+            console.log("User left:", key, leftPresences)
+          })
+          .subscribe(async (status) => {
+            if (status === "SUBSCRIBED") {
+              // Track presence
+              await channel.track({
+                user_id: token,
+                online_at: new Date().toISOString(),
+              })
+            }
+          })
 
-      channelRef.current = channel
-    } catch (err) {
-      console.error("Error joining session:", err)
-      setError(err instanceof Error ? err.message : "Unknown error occurred")
-      setIsConnected(false)
-    }
-  }
+        channelRef.current = channel
+      } catch (err) {
+        console.error("Failed to join session:", err)
+        setError(err instanceof Error ? err.message : "Failed to join session")
+        setIsConnected(false)
+      }
+    },
+    [getToken],
+  )
 
   const leaveSession = useCallback(async () => {
     if (channelRef.current) {
-      await channelRef.current.unsubscribe()
+      try {
+        const token = await getToken({ template: "supabase" })
+        if (token) {
+          const supabase = createBrowserClientWithToken(token)
+          await supabase.removeChannel(channelRef.current)
+        }
+      } catch (err) {
+        console.error("Error leaving session:", err)
+      }
+
       channelRef.current = null
+      setIsConnected(false)
     }
-    setIsConnected(false)
-    setError(null)
-  }, [])
+  }, [getToken])
 
   return {
     isConnected,

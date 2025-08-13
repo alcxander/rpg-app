@@ -1,13 +1,13 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { supabase } from "@/lib/supabaseClient"
+import { createClient } from "@/lib/supabaseClient"
 import type { RealtimeChannel } from "@supabase/supabase-js"
 
 interface SessionData {
   id: string
-  name: string
   campaign_id: string
+  name: string
   active: boolean
   created_at: string
   updated_at: string
@@ -26,65 +26,77 @@ export function useRealtimeSession(sessionId: string): UseRealtimeSessionReturn 
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const channelRef = useRef<RealtimeChannel | null>(null)
-  const hasJoined = useRef(false)
+  const supabase = createClient()
 
   const joinSession = async () => {
-    if (!sessionId || hasJoined.current) return
+    if (!sessionId) {
+      setError("No session ID provided")
+      setIsLoading(false)
+      return
+    }
 
     console.log("[useRealtimeSession] Attempting to join session:", sessionId)
     setIsLoading(true)
     setError(null)
 
     try {
-      // Use the join-session API endpoint which handles permissions properly
+      // Use the join-session API endpoint instead of direct Supabase query
       const response = await fetch("/api/join-session", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         credentials: "include",
         body: JSON.stringify({ sessionId }),
       })
 
-      console.log("[useRealtimeSession] Join response:", {
+      console.log("[useRealtimeSession] Join session response:", {
         ok: response.ok,
         status: response.status,
+        sessionId,
       })
 
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || `Failed to join session: ${response.status}`)
+        const errorData = await response.json().catch(() => ({ error: "Unknown error" }))
+        throw new Error(errorData.error || `HTTP ${response.status}`)
       }
 
       const data = await response.json()
-      console.log("[useRealtimeSession] Join successful:", data)
+      console.log("[useRealtimeSession] Join session success:", data)
 
-      setSessionData(data.session)
-      hasJoined.current = true
+      if (data.session) {
+        setSessionData(data.session)
 
-      // Set up realtime subscription
-      const channel = supabase
-        .channel(`session:${sessionId}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "sessions",
-            filter: `id=eq.${sessionId}`,
-          },
-          (payload) => {
-            console.log("[useRealtimeSession] Session update:", payload)
-            if (payload.new) {
-              setSessionData(payload.new as SessionData)
-            }
-          },
-        )
-        .subscribe()
+        // Set up realtime subscription
+        const channel = supabase
+          .channel(`session-${sessionId}`)
+          .on(
+            "postgres_changes",
+            {
+              event: "*",
+              schema: "public",
+              table: "sessions",
+              filter: `id=eq.${sessionId}`,
+            },
+            (payload) => {
+              console.log("[useRealtimeSession] Session update:", payload)
+              if (payload.new) {
+                setSessionData(payload.new as SessionData)
+              }
+            },
+          )
+          .subscribe((status) => {
+            console.log("[useRealtimeSession] Subscription status:", status)
+          })
 
-      channelRef.current = channel
-      console.log("[useRealtimeSession] Realtime subscription established")
+        channelRef.current = channel
+      } else {
+        throw new Error("No session data returned")
+      }
     } catch (err) {
-      console.error("[useRealtimeSession] Join failed:", err)
-      setError(err instanceof Error ? err.message : "Failed to join session")
+      console.error("[useRealtimeSession] Join session error:", err)
+      const errorMessage = err instanceof Error ? err.message : "Failed to join session"
+      setError(errorMessage)
     } finally {
       setIsLoading(false)
     }
@@ -100,12 +112,10 @@ export function useRealtimeSession(sessionId: string): UseRealtimeSessionReturn 
 
     setSessionData(null)
     setError(null)
-    hasJoined.current = false
   }
 
-  // Auto-join on mount
   useEffect(() => {
-    if (sessionId && !hasJoined.current) {
+    if (sessionId) {
       joinSession()
     }
 

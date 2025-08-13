@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import type { CampaignOption, Shopkeeper } from "@/types" // Declare the Shopkeeper variable here
+import type { CampaignOption, Shopkeeper } from "@/types"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useUser, RedirectToSignIn } from "@clerk/nextjs"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -23,20 +23,30 @@ import {
   AlertTriangle,
   Trash2,
   Sparkles,
+  Minus,
+  Coins,
 } from "lucide-react"
+
+interface PlayerGold {
+  player_id: string
+  gold_amount: number
+  player_name?: string
+}
 
 export default function ShopkeepersPage() {
   const router = useRouter()
   const search = useSearchParams()
-  const { isLoaded, isSignedIn } = useUser()
+  const { isLoaded, isSignedIn, user } = useUser()
   const { toast } = useToast()
 
   const [campaigns, setCampaigns] = useState<CampaignOption[]>([])
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
 
-  const [shopkeepers, setShopkeepers] = useState<Shopkeeper[]>([]) // Corrected the useState syntax here
+  const [shopkeepers, setShopkeepers] = useState<Shopkeeper[]>([])
   const [campaignAccessEnabled, setCampaignAccessEnabled] = useState<boolean>(true)
   const [isOwner, setIsOwner] = useState<boolean>(false)
+  const [playersGold, setPlayersGold] = useState<PlayerGold[]>([])
+  const [userGold, setUserGold] = useState<number>(0)
 
   const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
@@ -113,7 +123,7 @@ export default function ShopkeepersPage() {
         showError("Failed to load campaigns", String(e?.message || e))
       }
     })()
-  }, [isLoaded, isSignedIn]) // eslint-disable-line
+  }, [isLoaded, isSignedIn])
 
   // Load shopkeepers for a campaign
   const loadShopkeepers = async (cid: string) => {
@@ -139,9 +149,48 @@ export default function ShopkeepersPage() {
     }
   }
 
+  // Load players gold for DM
+  const loadPlayersGold = async (cid: string) => {
+    if (!isOwner) return
+    console.log("[shopkeepers.page] load players gold: start", { campaignId: cid })
+    try {
+      const res = await fetch(`/api/players/gold?campaignId=${encodeURIComponent(cid)}`, { credentials: "include" })
+      const { data, raw } = await parseJsonSafe(res)
+      console.log("[shopkeepers.page] load players gold: response", { ok: res.ok, status: res.status, len: raw.length })
+      if (res.ok) {
+        setPlayersGold(data.rows || [])
+      }
+    } catch (e: any) {
+      console.error("[shopkeepers.page] load players gold error", e)
+    }
+  }
+
+  // Load user's own gold for players
+  const loadUserGold = async (cid: string) => {
+    if (isOwner || !user?.id) return
+    console.log("[shopkeepers.page] load user gold: start", { campaignId: cid, userId: user.id })
+    try {
+      const res = await fetch(
+        `/api/players/gold?campaignId=${encodeURIComponent(cid)}&playerId=${encodeURIComponent(user.id)}`,
+        { credentials: "include" },
+      )
+      const { data, raw } = await parseJsonSafe(res)
+      console.log("[shopkeepers.page] load user gold: response", { ok: res.ok, status: res.status, len: raw.length })
+      if (res.ok && data.rows?.[0]) {
+        setUserGold(data.rows[0].gold_amount || 0)
+      }
+    } catch (e: any) {
+      console.error("[shopkeepers.page] load user gold error", e)
+    }
+  }
+
   useEffect(() => {
-    if (selectedCampaignId) loadShopkeepers(selectedCampaignId)
-  }, [selectedCampaignId]) // eslint-disable-line
+    if (selectedCampaignId) {
+      loadShopkeepers(selectedCampaignId)
+      loadPlayersGold(selectedCampaignId)
+      loadUserGold(selectedCampaignId)
+    }
+  }, [selectedCampaignId, isOwner])
 
   // Generate (now allows 1–20 and tops up only the delta)
   const onGenerate = async () => {
@@ -273,8 +322,9 @@ export default function ShopkeepersPage() {
     autoGenTriggered.current = true
     console.log("[shopkeepers.page] auto-generate: trigger", { campaignId: selectedCampaignId, count: c || count })
     onGenerate()
-  }, [selectedCampaignId, shouldAutoGenerate]) // eslint-disable-line
+  }, [selectedCampaignId, shouldAutoGenerate])
 
+  // Update inventory without full page reload
   const updateInventory = async (inventoryId: string, action: "increment" | "decrement") => {
     try {
       const response = await fetch(`/api/shopkeepers/inventory/${inventoryId}`, {
@@ -293,11 +343,98 @@ export default function ShopkeepersPage() {
       const data = await response.json()
       console.log("[shopkeepers.page] inventory updated", { inventoryId, action, data })
 
-      // Refresh the shopkeepers list to show updated quantities
-      await loadShopkeepers(selectedCampaignId)
+      // Update only the specific item in state instead of reloading everything
+      setShopkeepers((prevShopkeepers) =>
+        prevShopkeepers.map((sk) => ({
+          ...sk,
+          inventory: sk.inventory.map((item) =>
+            item.id === inventoryId
+              ? { ...item, stock_quantity: data.item?.stock_quantity ?? item.stock_quantity }
+              : item,
+          ),
+        })),
+      )
+
+      toast({
+        title: "Stock updated",
+        className: "bg-green-600 text-white",
+      })
     } catch (error) {
       console.error("[shopkeepers.page] inventory update error", error)
       showError("Inventory update failed", "Network error")
+    }
+  }
+
+  // Update player gold
+  const updatePlayerGold = async (playerId: string, newAmount: number) => {
+    if (!selectedCampaignId) return
+    try {
+      const res = await fetch("/api/players/gold", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          playerId,
+          campaignId: selectedCampaignId,
+          goldAmount: newAmount,
+        }),
+      })
+
+      if (!res.ok) {
+        const errorData = await res.json()
+        throw new Error(errorData.error || "Failed to update gold")
+      }
+
+      toast({
+        title: "Player gold updated",
+        className: "bg-green-600 text-white",
+      })
+
+      await loadPlayersGold(selectedCampaignId)
+    } catch (e: any) {
+      showError("Error updating gold", String(e?.message || e))
+    }
+  }
+
+  // Purchase item for player
+  const purchaseItem = async (shopkeeperId: string, itemId: string, itemPrice: number) => {
+    if (!selectedCampaignId || !user?.id) return
+    if (userGold < itemPrice) {
+      toast({
+        title: "Insufficient gold",
+        description: `You need ${itemPrice} gold but only have ${userGold}`,
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      const res = await fetch("/api/shopkeepers/purchase", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          shopkeeperId,
+          itemId,
+          campaignId: selectedCampaignId,
+        }),
+      })
+
+      if (!res.ok) {
+        const errorData = await res.json()
+        throw new Error(errorData.error || "Purchase failed")
+      }
+
+      toast({
+        title: "Purchase successful",
+        className: "bg-green-600 text-white",
+      })
+
+      // Reload data to reflect changes
+      await loadShopkeepers(selectedCampaignId)
+      await loadUserGold(selectedCampaignId)
+    } catch (e: any) {
+      showError("Purchase failed", String(e?.message || e))
     }
   }
 
@@ -317,7 +454,14 @@ export default function ShopkeepersPage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold text-purple-400">Shopkeepers</h1>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
+            {!isOwner && (
+              <div className="flex items-center gap-2 bg-yellow-600/20 px-3 py-2 rounded-lg border border-yellow-600/40">
+                <Coins className="w-4 h-4 text-yellow-400" />
+                <span className="text-yellow-200 font-medium">{userGold} Gold</span>
+              </div>
+            )}
+
             <Button
               onClick={() => router.push("/")}
               variant="secondary"
@@ -371,48 +515,12 @@ export default function ShopkeepersPage() {
         <Tabs defaultValue="market">
           <TabsList className="bg-gray-800">
             <TabsTrigger value="market">Market</TabsTrigger>
-            <TabsTrigger value="management">Management</TabsTrigger>
-            <TabsTrigger value="players">Players</TabsTrigger>
+            {isOwner && <TabsTrigger value="management">Management</TabsTrigger>}
+            {isOwner && <TabsTrigger value="players">Players</TabsTrigger>}
           </TabsList>
 
           {/* Market Tab */}
           <TabsContent value="market" className="mt-4">
-            {/* Show DM controls at top; hidden for non-owners */}
-            {isOwner && (
-              <Card className="bg-gray-800 border-gray-700 mb-4">
-                <CardContent className="py-4 flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <Label className="text-gray-300">Generate count</Label>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={20}
-                      value={count}
-                      onChange={(e) => setCount(Math.max(1, Math.min(20, Number.parseInt(e.target.value || "1", 10))))}
-                      className="w-24 bg-gray-900 border-gray-700 text-white"
-                    />
-                  </div>
-                  <Button
-                    onClick={onGenerate}
-                    className="bg-purple-600 hover:bg-purple-700 text-white"
-                    disabled={generating || !selectedCampaignId}
-                    title="Generate new shopkeepers"
-                  >
-                    {generating ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
-                    Generate Shopkeepers
-                  </Button>
-                  <Button
-                    onClick={toggleAccess}
-                    variant="secondary"
-                    className="bg-gray-900 border border-gray-700 text-white"
-                  >
-                    <ToggleRight className="w-4 h-4 mr-2" />
-                    {campaignAccessEnabled ? "Disable player access" : "Enable player access"}
-                  </Button>
-                </CardContent>
-              </Card>
-            )}
-
             {loading ? (
               <div className="flex items-center text-gray-400">
                 <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading shopkeepers...
@@ -506,33 +614,30 @@ export default function ShopkeepersPage() {
                                       size="sm"
                                       variant="secondary"
                                       className="bg-gray-700 text-white"
-                                      onClick={() => {
-                                        updateInventory(it.id, "decrement")
-                                      }}
+                                      onClick={() => updateInventory(it.id, "decrement")}
+                                      disabled={it.stock_quantity <= 0}
                                       title="Remove one (DM)"
                                     >
-                                      -1
+                                      <Minus className="w-3 h-3" />
                                     </Button>
                                     <Button
                                       size="sm"
                                       variant="secondary"
                                       className="bg-gray-700 text-white"
-                                      onClick={() => {
-                                        updateInventory(it.id, "increment")
-                                      }}
+                                      onClick={() => updateInventory(it.id, "increment")}
                                       title="Add one (DM)"
                                     >
-                                      +1
+                                      <Plus className="w-3 h-3" />
                                     </Button>
                                   </>
                                 ) : (
                                   <Button
                                     size="sm"
                                     className="bg-purple-600 hover:bg-purple-700 text-white"
-                                    onClick={() => {
-                                      /* hook up purchase when ready */
-                                    }}
-                                    disabled={it.stock_quantity <= 0 || !campaignAccessEnabled}
+                                    onClick={() => purchaseItem(sk.id, it.id, it.final_price)}
+                                    disabled={
+                                      it.stock_quantity <= 0 || !campaignAccessEnabled || userGold < it.final_price
+                                    }
                                     title="Buy 1"
                                   >
                                     <ShoppingCart className="w-4 h-4 mr-1" /> Buy
@@ -551,11 +656,14 @@ export default function ShopkeepersPage() {
           </TabsContent>
 
           {/* Management Tab */}
-          <TabsContent value="management" className="mt-4">
-            {isOwner ? (
-              <>
-                <Card className="bg-gray-800 border-gray-700 mb-4">
-                  <CardContent className="py-4 flex flex-wrap items-center gap-3">
+          {isOwner && (
+            <TabsContent value="management" className="mt-4">
+              <Card className="bg-gray-800 border-gray-700 mb-4">
+                <CardHeader>
+                  <CardTitle>Shopkeeper Management</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex flex-wrap items-center gap-3">
                     <div className="flex items-center gap-2">
                       <Label className="text-gray-300">Generate count</Label>
                       <Input
@@ -578,7 +686,7 @@ export default function ShopkeepersPage() {
                         <Loader2 className="w-4 h-4 animate-spin mr-2" />
                       ) : (
                         <Plus className="w-4 h-4 mr-2" />
-                      )}{" "}
+                      )}
                       Generate Shopkeepers
                     </Button>
                     <Button
@@ -604,17 +712,77 @@ export default function ShopkeepersPage() {
                         Quick add 5 shopkeepers
                       </Button>
                     )}
-                  </CardContent>
-                </Card>
-              </>
-            ) : (
-              <p className="text-gray-400">Only the DM can access management.</p>
-            )}
-          </TabsContent>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
 
-          <TabsContent value="players" className="mt-4">
-            <p className="text-gray-400">Only the DM can edit player gold.</p>
-          </TabsContent>
+          {/* Players Tab */}
+          {isOwner && (
+            <TabsContent value="players" className="mt-4">
+              <Card className="bg-gray-800 border-gray-700">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Coins className="w-5 h-5" />
+                    Player Gold Management
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {playersGold.length === 0 ? (
+                    <div className="text-center py-8 text-gray-400">
+                      <Coins className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                      <p>No player gold records found</p>
+                      <p className="text-sm">Gold records are created when players make purchases</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {playersGold.map((playerGold) => (
+                        <div
+                          key={playerGold.player_id}
+                          className="flex items-center justify-between p-4 bg-gray-700 rounded-lg"
+                        >
+                          <div>
+                            <p className="font-medium">
+                              {playerGold.player_name || playerGold.player_id.substring(0, 12) + "..."}
+                            </p>
+                            <p className="text-sm text-gray-400">
+                              Player ID: {playerGold.player_id.substring(0, 12)}...
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type="number"
+                              value={playerGold.gold_amount}
+                              onChange={(e) => {
+                                const newAmount = Number.parseFloat(e.target.value) || 0
+                                setPlayersGold((prev) =>
+                                  prev.map((p) =>
+                                    p.player_id === playerGold.player_id ? { ...p, gold_amount: newAmount } : p,
+                                  ),
+                                )
+                              }}
+                              className="w-24 bg-gray-600 border-gray-500 text-white"
+                              min="0"
+                              step="0.01"
+                            />
+                            <span className="text-yellow-400 font-medium">gp</span>
+                            <Button
+                              size="sm"
+                              onClick={() => updatePlayerGold(playerGold.player_id, playerGold.gold_amount)}
+                              className="bg-green-600 hover:bg-green-700"
+                            >
+                              Update
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
         </Tabs>
       </div>
     </div>

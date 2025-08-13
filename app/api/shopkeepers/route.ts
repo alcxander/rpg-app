@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server"
-import { getAuth } from "@clerk/nextjs/server"
+import { auth } from "@clerk/nextjs/server"
 import { createAdminClient } from "@/lib/supabaseAdmin"
 
 function rid() {
@@ -10,30 +10,74 @@ export async function GET(req: NextRequest) {
   const reqId = rid()
   const url = new URL(req.url)
   const campaignId = url.searchParams.get("campaignId") || ""
+
   try {
-    const { userId, sessionId } = getAuth(req)
+    const { userId } = await auth()
     console.log("[api/shopkeepers] GET start", {
       reqId,
       userId: !!userId,
-      sessionId,
       campaignId,
     })
-    if (!campaignId) return NextResponse.json({ error: "campaignId required" }, { status: 400 })
+
+    if (!campaignId) {
+      console.log("[api/shopkeepers] GET missing campaignId", { reqId })
+      return NextResponse.json({ error: "campaignId required" }, { status: 400 })
+    }
 
     const supabase = createAdminClient()
 
-    // Fetch campaign and verify access
-    const { data: camp, error: campErr } = await supabase
+    // Get campaign and check access
+    const { data: campaign, error: campaignError } = await supabase
       .from("campaigns")
-      .select("id,owner_id,access_enabled")
+      .select("*")
       .eq("id", campaignId)
       .single()
-    if (campErr || !camp) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
-    const isOwner = userId && camp.owner_id === userId
-    if (!isOwner && !camp.access_enabled) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    if (campaignError || !campaign) {
+      console.log("[api/shopkeepers] GET campaign not found", { reqId, error: campaignError })
+      return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
     }
+
+    // Check if user has access to this campaign
+    let hasAccess = false
+    let accessReason = ""
+
+    if (userId && campaign.owner_id === userId) {
+      hasAccess = true
+      accessReason = "campaign owner"
+    } else if (userId) {
+      // Check if user is a member of the campaign
+      const { data: membership, error: memberError } = await supabase
+        .from("campaign_members")
+        .select("role")
+        .eq("campaign_id", campaignId)
+        .eq("user_id", userId)
+        .single()
+
+      if (membership) {
+        hasAccess = true
+        accessReason = `campaign member (${membership.role})`
+      } else if (memberError && memberError.code !== "PGRST116") {
+        console.error("[api/shopkeepers] GET membership check error", { reqId, error: memberError })
+      }
+    }
+
+    if (!hasAccess) {
+      console.log("[api/shopkeepers] GET access denied", {
+        reqId,
+        userId,
+        campaignId,
+        campaignOwnerId: campaign.owner_id,
+      })
+      return NextResponse.json(
+        {
+          error: "Access denied. You must be a member of this campaign to view its shopkeepers.",
+        },
+        { status: 403 },
+      )
+    }
+
+    console.log("[api/shopkeepers] GET access granted", { reqId, accessReason })
 
     // Get active shopkeepers (removed=false or null)
     const { data: shops, error: shopsErr } = await supabase
@@ -44,12 +88,13 @@ export async function GET(req: NextRequest) {
       .order("created_at", { ascending: false })
 
     if (shopsErr) {
-      console.error("[api/shopkeepers] shops error", { reqId, error: shopsErr.message })
+      console.error("[api/shopkeepers] GET shops error", { reqId, error: shopsErr.message })
       return NextResponse.json({ error: shopsErr.message }, { status: 500 })
     }
 
     const ids = (shops ?? []).map((s) => s.id)
     let inventoryByShop: Record<string, any[]> = {}
+
     if (ids.length > 0) {
       const { data: items, error: itemsErr } = await supabase
         .from("shopkeeper_inventory")
@@ -57,9 +102,10 @@ export async function GET(req: NextRequest) {
         .in("shopkeeper_id", ids)
 
       if (itemsErr) {
-        console.error("[api/shopkeepers] inventory error", { reqId, error: itemsErr.message })
+        console.error("[api/shopkeepers] GET inventory error", { reqId, error: itemsErr.message })
         return NextResponse.json({ error: itemsErr.message }, { status: 500 })
       }
+
       inventoryByShop = (items ?? []).reduce((acc: Record<string, any[]>, it: any) => {
         const sid = it.shopkeeper_id
         if (!acc[sid]) acc[sid] = []
@@ -81,19 +127,24 @@ export async function GET(req: NextRequest) {
       inventory: inventoryByShop[s.id] ?? [],
     }))
 
-    console.log("[api/shopkeepers] GET done", {
+    console.log("[api/shopkeepers] GET success", {
       reqId,
       campaignId,
       count: result.length,
-      isOwner,
-      access: camp.access_enabled,
+      accessReason,
     })
+
     return NextResponse.json({
-      campaign: { id: campaignId, isOwner, access_enabled: camp.access_enabled },
+      campaign: {
+        id: campaignId,
+        name: campaign.name,
+        hasAccess: true,
+        accessReason,
+      },
       shopkeepers: result,
     })
   } catch (e: any) {
-    console.error("[api/shopkeepers] exception", { reqId, message: e?.message })
+    console.error("[api/shopkeepers] GET exception", { reqId, message: e?.message })
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

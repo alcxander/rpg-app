@@ -1,12 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getAuth } from "@clerk/nextjs/server"
+import { auth } from "@clerk/nextjs/server"
 import { createAdminClient } from "@/lib/supabaseAdmin"
 
 export const runtime = "nodejs"
 
 // GET: list campaigns owned by the user and campaigns where the user participates in any session
 export async function GET() {
-  const { userId, getToken } = await getAuth()
+  const { userId, getToken } = await auth()
   if (!userId || !getToken) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const token = await getToken({ template: "supabase" })
@@ -44,41 +44,21 @@ export async function POST(request: NextRequest) {
   try {
     console.log("[api/invite] POST start", { reqId })
 
-    const { userId } = await getAuth(request)
-    if (!userId) {
+    const { userId, getToken } = await auth()
+    if (!userId || !getToken) {
       console.log("[api/invite] POST unauthorized", { reqId })
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
     const body = await request.json()
-    const { campaignId, userIdToInvite, name } = body
+    const { campaignId, inviteUserId, role = "Player" } = body
 
-    console.log("[api/invite] POST processing", {
-      reqId,
-      campaignId,
-      userIdToInvite,
-      inviterName: name,
-      inviterId: userId,
-    })
-
-    if (!campaignId && !userIdToInvite) {
-      const name = String(body?.name || "").trim()
-      if (!name) return NextResponse.json({ error: "Name is required" }, { status: 400 })
-
-      const supabase = createAdminClient()
-      const { data, error } = await supabase
-        .from("campaigns")
-        .insert({ name, owner_id: userId, settings: { members: [] } })
-        .select("id, name")
-        .single()
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-      return NextResponse.json({ campaign: data })
+    if (!campaignId || !inviteUserId) {
+      console.log("[api/invite] POST missing required fields", { reqId, campaignId, inviteUserId })
+      return NextResponse.json({ error: "Campaign ID and user ID are required" }, { status: 400 })
     }
 
-    if (!campaignId || !userIdToInvite) {
-      console.log("[api/invite] POST missing required fields", { reqId, campaignId, userIdToInvite })
-      return NextResponse.json({ error: "Campaign ID and user ID to invite are required" }, { status: 400 })
-    }
+    console.log("[api/invite] POST processing", { reqId, campaignId, inviteUserId, role, invitedBy: userId })
 
     const supabase = createAdminClient()
 
@@ -94,100 +74,121 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
     }
 
-    // Check if inviter is the owner or has DM permissions
-    if (campaign.owner_id !== userId) {
-      const { data: memberCheck } = await supabase
+    // Check if inviter has permission (owner or DM)
+    let canInvite = false
+    let inviterRole = ""
+
+    if (campaign.owner_id === userId) {
+      canInvite = true
+      inviterRole = "Owner"
+    } else {
+      const { data: membership, error: memberError } = await supabase
         .from("campaign_members")
         .select("role")
         .eq("campaign_id", campaignId)
         .eq("user_id", userId)
         .single()
 
-      if (!memberCheck || memberCheck.role !== "DM") {
-        console.log("[api/invite] POST insufficient permissions", {
-          reqId,
-          userId,
-          campaignOwnerId: campaign.owner_id,
-        })
-        return NextResponse.json({ error: "Only campaign owners and DMs can invite players" }, { status: 403 })
+      if (membership && membership.role === "DM") {
+        canInvite = true
+        inviterRole = "DM"
+      } else if (memberError && memberError.code !== "PGRST116") {
+        console.error("[api/invite] POST membership check error", { reqId, error: memberError })
       }
     }
 
-    // Verify the user to invite exists
-    const { data: userToInvite, error: userError } = await supabase
-      .from("users")
-      .select("*")
-      .eq("id", userIdToInvite)
-      .single()
-
-    if (userError || !userToInvite) {
-      console.log("[api/invite] POST user to invite not found", { reqId, userIdToInvite, error: userError })
+    if (!canInvite) {
+      console.log("[api/invite] POST insufficient permissions", {
+        reqId,
+        userId,
+        campaignId,
+        campaignOwnerId: campaign.owner_id,
+      })
       return NextResponse.json(
         {
-          error: "User not found. Make sure they have signed up and their user ID is correct.",
+          error: "Only campaign owners and DMs can invite users",
         },
-        { status: 404 },
+        { status: 403 },
       )
     }
 
+    console.log("[api/invite] POST permission granted", { reqId, inviterRole })
+
+    // Check if the user to invite exists
+    const { data: inviteUser, error: userError } = await supabase
+      .from("users")
+      .select("*")
+      .eq("clerk_id", inviteUserId)
+      .single()
+
+    if (userError || !inviteUser) {
+      console.log("[api/invite] POST user not found", { reqId, inviteUserId, error: userError })
+      return NextResponse.json({ error: "User not found" }, { status: 404 })
+    }
+
     // Check if user is already a member
-    const { data: existingMember } = await supabase
+    const { data: existingMember, error: existingError } = await supabase
       .from("campaign_members")
       .select("*")
       .eq("campaign_id", campaignId)
-      .eq("user_id", userIdToInvite)
+      .eq("user_id", inviteUser.id)
       .single()
 
     if (existingMember) {
-      console.log("[api/invite] POST user already member", { reqId, userIdToInvite, campaignId })
-      return NextResponse.json({ error: "User is already a member of this campaign" }, { status: 400 })
+      console.log("[api/invite] POST user already member", { reqId, inviteUserId, existingRole: existingMember.role })
+      return NextResponse.json(
+        {
+          error: `User is already a member of this campaign with role: ${existingMember.role}`,
+        },
+        { status: 400 },
+      )
     }
 
-    // Add the user to campaign_members
-    const { data: newMember, error: memberError } = await supabase
+    // Cannot invite the campaign owner
+    if (inviteUser.id === campaign.owner_id) {
+      console.log("[api/invite] POST cannot invite owner", { reqId, inviteUserId })
+      return NextResponse.json({ error: "Cannot invite the campaign owner" }, { status: 400 })
+    }
+
+    // Add user to campaign_members
+    const { data: newMember, error: inviteError } = await supabase
       .from("campaign_members")
       .insert({
         campaign_id: campaignId,
-        user_id: userIdToInvite,
-        role: "Player", // Default role for legacy invite system
+        user_id: inviteUser.id,
+        role: role,
         added_by: userId,
       })
-      .select()
+      .select(`
+        *,
+        users (
+          id,
+          name,
+          clerk_id
+        )
+      `)
       .single()
 
-    if (memberError) {
-      console.error("[api/invite] POST failed to add member", { reqId, error: memberError })
-      return NextResponse.json({ error: "Failed to add user to campaign" }, { status: 500 })
-    }
-
-    // Initialize player's gold for this campaign
-    const { error: goldError } = await supabase.from("players_gold").insert({
-      player_id: userIdToInvite,
-      campaign_id: campaignId,
-      gold_amount: 0,
-    })
-
-    if (goldError) {
-      console.log("[api/invite] POST gold init error", {
-        reqId,
-        error: goldError.message,
-      })
-      // Don't fail the invite if gold initialization fails
+    if (inviteError) {
+      console.error("[api/invite] POST invite error", { reqId, error: inviteError })
+      return NextResponse.json({ error: "Failed to invite user" }, { status: 500 })
     }
 
     console.log("[api/invite] POST success", {
       reqId,
-      memberId: newMember.id,
       campaignId,
-      userIdToInvite,
       campaignName: campaign.name,
+      inviteUserId,
+      inviteUserName: inviteUser.name,
+      role,
+      invitedBy: userId,
+      inviterRole,
     })
 
     return NextResponse.json({
       success: true,
       member: newMember,
-      campaign: campaign,
-      message: `${userToInvite.name} has been invited to campaign "${campaign.name}"`,
+      message: `Successfully invited ${inviteUser.name} to campaign "${campaign.name}" as ${role}`,
     })
   } catch (error: any) {
     console.error("[api/invite] POST error", { reqId, error: error.message, stack: error.stack })

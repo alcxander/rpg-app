@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getAuth } from "@clerk/nextjs/server"
+import { auth } from "@clerk/nextjs/server"
 import { createAdminClient } from "@/lib/supabaseAdmin"
+
+export const runtime = "nodejs"
 
 export async function GET(request: NextRequest) {
   const reqId = Math.random().toString(36).substring(7)
@@ -8,8 +10,8 @@ export async function GET(request: NextRequest) {
   try {
     console.log("[api/sessions] GET start", { reqId })
 
-    const { userId } = await getAuth(request)
-    if (!userId) {
+    const { userId, getToken } = await auth()
+    if (!userId || !getToken) {
       console.log("[api/sessions] GET unauthorized", { reqId })
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
@@ -22,11 +24,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Campaign ID is required" }, { status: 400 })
     }
 
-    console.log("[api/sessions] GET sessions for campaign", { reqId, campaignId, userId })
+    console.log("[api/sessions] GET processing", { reqId, campaignId, userId })
 
     const supabase = createAdminClient()
 
-    // First, verify user has access to this campaign
+    // Check if user has access to this campaign
+    let hasAccess = false
+    let accessReason = ""
+
+    // First check if user owns the campaign
     const { data: campaign, error: campaignError } = await supabase
       .from("campaigns")
       .select("*")
@@ -38,11 +44,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
     }
 
-    // Check if user has access to this campaign
-    let hasAccess = false
-    let accessReason = ""
-
-    // Check if user is the campaign owner
     if (campaign.owner_id === userId) {
       hasAccess = true
       accessReason = "campaign owner"
@@ -50,7 +51,7 @@ export async function GET(request: NextRequest) {
       // Check if user is a member of the campaign
       const { data: membership, error: memberError } = await supabase
         .from("campaign_members")
-        .select("*")
+        .select("role")
         .eq("campaign_id", campaignId)
         .eq("user_id", userId)
         .single()
@@ -58,8 +59,8 @@ export async function GET(request: NextRequest) {
       if (membership) {
         hasAccess = true
         accessReason = `campaign member (${membership.role})`
-      } else if (memberError) {
-        console.log("[api/sessions] GET membership check error", { reqId, error: memberError })
+      } else if (memberError && memberError.code !== "PGRST116") {
+        console.error("[api/sessions] GET membership check error", { reqId, error: memberError })
       }
     }
 
@@ -97,6 +98,7 @@ export async function GET(request: NextRequest) {
       campaignId,
       sessionCount: sessions?.length || 0,
       accessReason,
+      sessions: sessions?.map((s) => ({ id: s.id, active: s.active, participants: s.participants?.length || 0 })),
     })
 
     return NextResponse.json({
@@ -104,6 +106,7 @@ export async function GET(request: NextRequest) {
       campaign: {
         id: campaign.id,
         name: campaign.name,
+        owner_id: campaign.owner_id,
       },
     })
   } catch (error: any) {
@@ -118,8 +121,8 @@ export async function POST(request: NextRequest) {
   try {
     console.log("[api/sessions] POST start", { reqId })
 
-    const { userId } = await getAuth(request)
-    if (!userId) {
+    const { userId, getToken } = await auth()
+    if (!userId || !getToken) {
       console.log("[api/sessions] POST unauthorized", { reqId })
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
@@ -132,11 +135,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Campaign ID and session ID are required" }, { status: 400 })
     }
 
-    console.log("[api/sessions] POST creating session", { reqId, campaignId, sessionId, userId })
+    console.log("[api/sessions] POST processing", { reqId, campaignId, sessionId, userId })
 
     const supabase = createAdminClient()
 
-    // Verify user has access to this campaign
+    // Check if user has permission to create sessions in this campaign
+    let canCreate = false
+    let accessReason = ""
+
+    // First check if user owns the campaign
     const { data: campaign, error: campaignError } = await supabase
       .from("campaigns")
       .select("*")
@@ -148,17 +155,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
     }
 
-    // Check if user has permission to create sessions (owner or DM)
-    let canCreate = false
-    let accessReason = ""
-
     if (campaign.owner_id === userId) {
       canCreate = true
       accessReason = "campaign owner"
     } else {
-      const { data: membership } = await supabase
+      // Check if user is a DM in the campaign
+      const { data: membership, error: memberError } = await supabase
         .from("campaign_members")
-        .select("*")
+        .select("role")
         .eq("campaign_id", campaignId)
         .eq("user_id", userId)
         .single()
@@ -166,6 +170,8 @@ export async function POST(request: NextRequest) {
       if (membership && membership.role === "DM") {
         canCreate = true
         accessReason = "campaign DM"
+      } else if (memberError && memberError.code !== "PGRST116") {
+        console.error("[api/sessions] POST membership check error", { reqId, error: memberError })
       }
     }
 
@@ -186,8 +192,12 @@ export async function POST(request: NextRequest) {
 
     console.log("[api/sessions] POST permission granted", { reqId, accessReason })
 
-    // Check if session ID already exists
-    const { data: existingSession } = await supabase.from("sessions").select("id").eq("id", sessionId).single()
+    // Check if session already exists
+    const { data: existingSession, error: existingError } = await supabase
+      .from("sessions")
+      .select("id")
+      .eq("id", sessionId)
+      .single()
 
     if (existingSession) {
       console.log("[api/sessions] POST session already exists", { reqId, sessionId })

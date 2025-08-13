@@ -199,12 +199,23 @@ export default function ShopkeepersPage() {
         { credentials: "include" },
       )
       const { data, raw } = await parseJsonSafe(res)
-      console.log("[shopkeepers.page] load user gold: response", { ok: res.ok, status: res.status, len: raw.length })
+      console.log("[shopkeepers.page] load user gold: response", {
+        ok: res.ok,
+        status: res.status,
+        len: raw.length,
+        data: data,
+      })
       if (res.ok && data.rows?.[0]) {
-        setUserGold(data.rows[0].gold_amount || 0)
+        const goldAmount = data.rows[0].gold_amount || 0
+        console.log("[shopkeepers.page] setting user gold:", goldAmount)
+        setUserGold(goldAmount)
+      } else {
+        console.log("[shopkeepers.page] no gold data found, setting to 0")
+        setUserGold(0)
       }
     } catch (e: any) {
       console.error("[shopkeepers.page] load user gold error", e)
+      setUserGold(0)
     }
   }
 
@@ -489,7 +500,8 @@ export default function ShopkeepersPage() {
             <h1 className="text-2xl font-bold text-purple-400">Shopkeepers</h1>
             {/* Debug info */}
             <div className="text-xs text-gray-500 bg-gray-800 px-2 py-1 rounded">
-              isOwner: {String(isOwner)} | userId: {user?.id?.substring(0, 8)}...
+              isOwner: {String(isOwner)} | userId: {user?.id?.substring(0, 8)}... | access:{" "}
+              {String(campaignAccessEnabled)} | gold: {userGold}
             </div>
           </div>
           <div className="flex gap-2 items-center">
@@ -637,53 +649,78 @@ export default function ShopkeepersPage() {
                           <span className="text-xs text-gray-400">{sk.inventory.length} items</span>
                         </div>
                         <div className="space-y-2">
-                          {sk.inventory.map((it) => (
-                            <div key={it.id} className="flex items-center justify-between text-sm">
-                              <div className="min-w-0">
-                                <div className="font-medium text-gray-200 truncate">{it.item_name}</div>
-                                <div className="text-xs text-gray-400">
-                                  {it.rarity} • {it.final_price} gp • stock {it.stock_quantity}
+                          {sk.inventory.map((it) => {
+                            // Debug buy button conditions
+                            const hasStock = it.stock_quantity > 0
+                            const hasAccess = campaignAccessEnabled
+                            const hasGold = userGold >= it.final_price
+                            const canBuy = hasStock && hasAccess && hasGold
+
+                            console.log(`[shopkeepers.page] Buy button debug for ${it.item_name}:`, {
+                              hasStock,
+                              hasAccess,
+                              hasGold,
+                              canBuy,
+                              userGold,
+                              itemPrice: it.final_price,
+                              stockQuantity: it.stock_quantity,
+                              campaignAccessEnabled,
+                            })
+
+                            return (
+                              <div key={it.id} className="flex items-center justify-between text-sm">
+                                <div className="min-w-0">
+                                  <div className="font-medium text-gray-200 truncate">{it.item_name}</div>
+                                  <div className="text-xs text-gray-400">
+                                    {it.rarity} • {it.final_price} gp • stock {it.stock_quantity}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  {isOwner ? (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        className="bg-gray-700 text-white h-6 w-6 p-0"
+                                        onClick={() => updateInventory(it.id, "decrement")}
+                                        disabled={it.stock_quantity <= 0}
+                                        title="Remove one (DM)"
+                                      >
+                                        <Minus className="w-3 h-3" />
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        className="bg-gray-700 text-white h-6 w-6 p-0"
+                                        onClick={() => updateInventory(it.id, "increment")}
+                                        title="Add one (DM)"
+                                      >
+                                        <Plus className="w-3 h-3" />
+                                      </Button>
+                                    </>
+                                  ) : (
+                                    <Button
+                                      size="sm"
+                                      className="bg-purple-600 hover:bg-purple-700 text-white h-6 px-2"
+                                      onClick={() => purchaseItem(sk.id, it.id, it.final_price)}
+                                      disabled={!canBuy}
+                                      title={
+                                        !hasStock
+                                          ? "Out of stock"
+                                          : !hasAccess
+                                            ? "Shop access disabled"
+                                            : !hasGold
+                                              ? `Need ${it.final_price} gold (you have ${userGold})`
+                                              : "Buy 1"
+                                      }
+                                    >
+                                      <ShoppingCart className="w-3 h-3 mr-1" /> Buy
+                                    </Button>
+                                  )}
                                 </div>
                               </div>
-                              <div className="flex items-center gap-1">
-                                {isOwner ? (
-                                  <>
-                                    <Button
-                                      size="sm"
-                                      variant="secondary"
-                                      className="bg-gray-700 text-white h-6 w-6 p-0"
-                                      onClick={() => updateInventory(it.id, "decrement")}
-                                      disabled={it.stock_quantity <= 0}
-                                      title="Remove one (DM)"
-                                    >
-                                      <Minus className="w-3 h-3" />
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="secondary"
-                                      className="bg-gray-700 text-white h-6 w-6 p-0"
-                                      onClick={() => updateInventory(it.id, "increment")}
-                                      title="Add one (DM)"
-                                    >
-                                      <Plus className="w-3 h-3" />
-                                    </Button>
-                                  </>
-                                ) : (
-                                  <Button
-                                    size="sm"
-                                    className="bg-purple-600 hover:bg-purple-700 text-white h-6 px-2"
-                                    onClick={() => purchaseItem(sk.id, it.id, it.final_price)}
-                                    disabled={
-                                      it.stock_quantity <= 0 || !campaignAccessEnabled || userGold < it.final_price
-                                    }
-                                    title="Buy 1"
-                                  >
-                                    <ShoppingCart className="w-3 h-3 mr-1" /> Buy
-                                  </Button>
-                                )}
-                              </div>
-                            </div>
-                          ))}
+                            )
+                          })}
                         </div>
                       </div>
                     </CardContent>

@@ -28,21 +28,39 @@ export async function GET(request: NextRequest) {
 
     const supabaseAdmin = createAdminClient()
 
-    // Check if user has access to this campaign
-    const { data: membership } = await supabaseAdmin
-      .from("campaign_members")
-      .select("user_id, role")
-      .eq("campaign_id", campaignId)
-      .eq("user_id", user.id)
+    // First check if user is campaign owner
+    const { data: campaign, error: campaignError } = await supabaseAdmin
+      .from("campaigns")
+      .select("owner_id")
+      .eq("id", campaignId)
       .single()
 
-    if (!membership) {
-      console.log("[players/gold] User not a member of campaign")
-      return NextResponse.json({ error: "Not a campaign member" }, { status: 403 })
+    if (campaignError) {
+      console.error("[players/gold] Campaign not found:", campaignError)
+      return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
     }
 
-    const isOwner = membership.role === "owner"
-    console.log("[players/gold] User membership:", { isOwner, role: membership.role })
+    const isOwner = campaign.owner_id === user.id
+    console.log("[players/gold] Ownership check:", { isOwner, campaignOwnerId: campaign.owner_id, userId: user.id })
+
+    // If not owner, check membership
+    let isMember = false
+    if (!isOwner) {
+      const { data: membership } = await supabaseAdmin
+        .from("campaign_members")
+        .select("user_id, role")
+        .eq("campaign_id", campaignId)
+        .eq("user_id", user.id)
+        .single()
+
+      isMember = !!membership
+      console.log("[players/gold] Membership check:", { isMember, membership })
+    }
+
+    if (!isOwner && !isMember) {
+      console.log("[players/gold] Access denied: not owner or member")
+      return NextResponse.json({ error: "Not authorized for this campaign" }, { status: 403 })
+    }
 
     if (playerId) {
       // Player-side request: get specific player's gold
@@ -54,17 +72,19 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: "Access denied" }, { status: 403 })
       }
 
-      // Check if the target player is a member of this campaign
-      const { data: targetMembership } = await supabaseAdmin
-        .from("campaign_members")
-        .select("user_id, role")
-        .eq("campaign_id", campaignId)
-        .eq("user_id", playerId)
-        .single()
+      // Check if the target player has access to this campaign
+      if (!isOwner) {
+        const { data: targetMembership } = await supabaseAdmin
+          .from("campaign_members")
+          .select("user_id, role")
+          .eq("campaign_id", campaignId)
+          .eq("user_id", playerId)
+          .single()
 
-      if (!targetMembership) {
-        console.log("[players/gold] Target player not in campaign")
-        return NextResponse.json({ error: "Player not in campaign" }, { status: 404 })
+        if (!targetMembership && playerId !== campaign.owner_id) {
+          console.log("[players/gold] Target player not in campaign")
+          return NextResponse.json({ error: "Player not in campaign" }, { status: 404 })
+        }
       }
 
       // Get the player's gold using admin client (bypasses RLS)
@@ -98,16 +118,16 @@ export async function GET(request: NextRequest) {
 
       console.log("[players/gold] DM-side request: fetching all players")
 
-      // Get all campaign members with their gold
+      // Get all campaign members with their profiles
       const { data: membersData, error: membersError } = await supabaseAdmin
         .from("campaign_members")
         .select(`
           user_id,
           role,
           joined_at,
-          profiles!inner(
-            clerk_user_id,
-            full_name
+          users!inner(
+            clerk_id,
+            name
           )
         `)
         .eq("campaign_id", campaignId)
@@ -137,13 +157,38 @@ export async function GET(request: NextRequest) {
         const goldRecord = goldData?.find((g) => g.player_id === member.user_id)
         return {
           player_id: member.user_id,
-          player_clerk_id: member.profiles.clerk_user_id,
-          player_name: member.profiles.full_name || "Unknown",
+          player_clerk_id: member.users.clerk_id,
+          player_name: member.users.name || "Unknown",
           role: member.role,
           joined_at: member.joined_at,
           gold_amount: goldRecord?.gold_amount || 0,
         }
       })
+
+      // Also include the campaign owner if they have gold
+      const { data: ownerGold } = await supabaseAdmin
+        .from("players_gold")
+        .select("*")
+        .eq("campaign_id", campaignId)
+        .eq("player_id", campaign.owner_id)
+        .single()
+
+      if (ownerGold) {
+        const { data: ownerProfile } = await supabaseAdmin
+          .from("users")
+          .select("name, clerk_id")
+          .eq("clerk_id", campaign.owner_id)
+          .single()
+
+        combinedData.unshift({
+          player_id: campaign.owner_id,
+          player_clerk_id: campaign.owner_id,
+          player_name: ownerProfile?.name || "Campaign Owner",
+          role: "Owner",
+          joined_at: new Date().toISOString(),
+          gold_amount: ownerGold.gold_amount || 0,
+        })
+      }
 
       console.log("[players/gold] Combined data:", combinedData.length)
       return NextResponse.json({ rows: combinedData })
@@ -173,28 +218,25 @@ export async function POST(request: NextRequest) {
     const supabaseAdmin = createAdminClient()
 
     // Check if requesting user is campaign owner
-    const { data: membership } = await supabaseAdmin
-      .from("campaign_members")
-      .select("role")
-      .eq("campaign_id", campaignId)
-      .eq("user_id", user.id)
-      .single()
+    const { data: campaign } = await supabaseAdmin.from("campaigns").select("owner_id").eq("id", campaignId).single()
 
-    if (!membership || membership.role !== "owner") {
+    if (!campaign || campaign.owner_id !== user.id) {
       console.log("[players/gold] Access denied: not owner")
       return NextResponse.json({ error: "Owner access required" }, { status: 403 })
     }
 
-    // Verify target player is in campaign
-    const { data: targetMembership } = await supabaseAdmin
-      .from("campaign_members")
-      .select("user_id")
-      .eq("campaign_id", campaignId)
-      .eq("user_id", playerId)
-      .single()
+    // Verify target player is in campaign or is the owner
+    if (playerId !== campaign.owner_id) {
+      const { data: targetMembership } = await supabaseAdmin
+        .from("campaign_members")
+        .select("user_id")
+        .eq("campaign_id", campaignId)
+        .eq("user_id", playerId)
+        .single()
 
-    if (!targetMembership) {
-      return NextResponse.json({ error: "Player not in campaign" }, { status: 404 })
+      if (!targetMembership) {
+        return NextResponse.json({ error: "Player not in campaign" }, { status: 404 })
+      }
     }
 
     // Update or insert gold record

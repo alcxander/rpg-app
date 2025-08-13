@@ -89,4 +89,3 @@ Test: Toggle “available to players” hides the shop from player view and show
 code based tests
 
 Test: Affirm the typings being passed throughout code, adhere to typings and make sure there are no errors that say anything like 'argument of type X is not assignable to type Y'
-

@@ -1,11 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  webpack: (config) => {
-    config.externals.push({
-      'fabric': 'fabric'
-    })
-    return config
-  },
   eslint: {
     ignoreDuringBuilds: true,
   },
@@ -13,9 +7,17 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   images: {
-    domains: ['localhost'],
     unoptimized: true,
   },
+  experimental: {
+    serverComponentsExternalPackages: ['fabric']
+  },
+  webpack: (config) => {
+    config.externals.push({
+      'fabric': 'fabric'
+    })
+    return config
+  }
 }
 
 export default nextConfig

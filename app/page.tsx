@@ -20,10 +20,6 @@ import {
 } from "@/components/ui/dialog"
 import { useToast } from "@/hooks/use-toast"
 import { Sword, Shield, Users, MapPin, Dice6, Plus } from "lucide-react"
-import { auth } from "@clerk/nextjs/server"
-import { redirect } from "next/navigation"
-import { createClient } from "@/lib/supabaseClient"
-import Link from "next/link"
 import type { Battle, LootResult, MapToken, Campaign } from "@/types"
 import { useRealtimeSession } from "@/hooks/useRealtimeSession"
 import { useSessionChat } from "@/hooks/useSessionChat"
@@ -37,39 +33,12 @@ import { Initiative } from "@/components/Initiative"
 import { ChatMessages } from "@/components/ChatMessages"
 import { StatBlock } from "@/components/StatBlock"
 
-export default async function HomePage() {
-  const { userId } = await auth()
-
-  if (!userId) {
-    redirect("/sign-in")
-  }
-
-  const supabase = createClient()
-
-  // Fetch user's campaigns
-  const { data: campaignsData, error } = await supabase
-    .from("campaigns")
-    .select(`
-      *,
-      members:campaign_members(
-        id,
-        role,
-        user:users(id, email, name)
-      )
-    `)
-    .or(`dm_user_id.eq.${userId},members.user_id.eq.${userId}`)
-
-  if (error) {
-    console.error("Error fetching campaigns:", error)
-  }
-
-  const userCampaigns = (campaignsData as Campaign[]) || []
-
+export default function HomePage() {
   const { user } = useUser()
   const { toast } = useToast()
 
   // State management
-  const [campaigns, setCampaigns] = useState<Campaign[]>(userCampaigns)
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [selectedCampaign, setSelectedCampaign] = useState<string>("")
   const [sessions, setSessions] = useState<any[]>([])
   const [selectedSession, setSelectedSession] = useState<string>("")
@@ -107,6 +76,30 @@ export default async function HomePage() {
       initiativeOrder: entity.initiative_order || 0,
     }))
   }, [])
+
+  // Load campaigns on mount
+  useEffect(() => {
+    if (!user) return
+
+    const loadCampaigns = async () => {
+      try {
+        const response = await fetch("/api/campaigns")
+        if (response.ok) {
+          const data = await response.json()
+          setCampaigns(data.campaigns || [])
+        }
+      } catch (error) {
+        console.error("Failed to load campaigns:", error)
+        toast({
+          title: "Error",
+          description: "Failed to load campaigns",
+          variant: "destructive",
+        })
+      }
+    }
+
+    loadCampaigns()
+  }, [user, toast])
 
   // Load sessions when campaign changes
   useEffect(() => {
@@ -283,6 +276,19 @@ export default async function HomePage() {
     setShowStatBlock(true)
   }
 
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Card className="w-96">
+          <CardHeader>
+            <CardTitle>Welcome to RPG Campaign Manager</CardTitle>
+            <CardDescription>Please sign in to continue</CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto p-4">
@@ -292,36 +298,65 @@ export default async function HomePage() {
         </div>
 
         {/* Campaign Selection */}
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {campaigns.map((campaign) => (
-            <Card key={campaign.id}>
-              <CardHeader>
-                <CardTitle>{campaign.name}</CardTitle>
-                <CardDescription>{campaign.description}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">{campaign.members?.length || 0} members</span>
-                  <Button asChild size="sm">
-                    <Link href={`/campaigns/${campaign.id}`}>View</Link>
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              Campaign Selection
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-4 items-end">
+              <div className="flex-1">
+                <Label htmlFor="campaign-select">Select Campaign</Label>
+                <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose a campaign..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {campaigns.map((campaign) => (
+                      <SelectItem key={campaign.id} value={campaign.id}>
+                        {campaign.name} {campaign.is_owner ? "(Owner)" : "(Member)"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button>
+                    <Plus className="h-4 w-4 mr-2" />
+                    New Campaign
                   </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
-        {campaigns.length === 0 && (
-          <div className="text-center py-12">
-            <h2 className="text-xl font-semibold mb-4">No campaigns yet</h2>
-            <p className="text-muted-foreground mb-6">
-              Create your first campaign to get started with your RPG adventures!
-            </p>
-            <Button asChild>
-              <Link href="/campaigns/create">Create Your First Campaign</Link>
-            </Button>
-          </div>
-        )}
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Create New Campaign</DialogTitle>
+                    <DialogDescription>Create a new campaign to organize your adventures</DialogDescription>
+                  </DialogHeader>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      const formData = new FormData(e.currentTarget)
+                      const name = formData.get("name") as string
+                      if (name) createCampaign(name)
+                    }}
+                  >
+                    <div className="space-y-4">
+                      <div>
+                        <Label htmlFor="name">Campaign Name</Label>
+                        <Input id="name" name="name" placeholder="Enter campaign name..." required />
+                      </div>
+                      <Button type="submit" className="w-full">
+                        Create Campaign
+                      </Button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Session Selection */}
         {selectedCampaign && (

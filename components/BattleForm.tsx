@@ -19,7 +19,7 @@ interface BattleFormProps {
   setIsGenerating: (generating: boolean) => void
 }
 
-export default function BattleForm({ sessionId, onBattleGenerated, isGenerating, setIsGenerating }: BattleFormProps) {
+export function BattleForm({ sessionId, onBattleGenerated, isGenerating, setIsGenerating }: BattleFormProps) {
   const [partyLevel, setPartyLevel] = useState(3)
   const [partySize, setPartySize] = useState(4)
   const [challengeRating, setChallengeRating] = useState("Medium")
@@ -158,3 +158,5 @@ export default function BattleForm({ sessionId, onBattleGenerated, isGenerating,
     </Card>
   )
 }
+
+export default BattleForm

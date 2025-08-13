@@ -1,33 +1,43 @@
-import { vi, beforeEach } from "vitest"
+import { vi } from "vitest"
 
-// Mock Next.js environment
-process.env.NODE_ENV = "test"
+// Mock global Request and Response
+global.Request = class MockRequest {
+  constructor(
+    public url: string,
+    public init?: RequestInit,
+  ) {}
+  json() {
+    return Promise.resolve({})
+  }
+  text() {
+    return Promise.resolve("")
+  }
+} as any
 
-// Mock environment variables
-process.env.NEXT_PUBLIC_SUPABASE_URL = "https://test.supabase.co"
-process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role-key"
-process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "test-anon-key"
+global.Response = class MockResponse {
+  constructor(
+    public body?: any,
+    public init?: ResponseInit,
+  ) {}
+  json() {
+    return Promise.resolve(this.body)
+  }
+  text() {
+    return Promise.resolve(String(this.body))
+  }
+  get ok() {
+    return (this.init?.status || 200) < 400
+  }
+  get status() {
+    return this.init?.status || 200
+  }
+} as any
 
-// Global test setup
-beforeEach(() => {
-  vi.clearAllMocks()
-})
-
-// Mock fetch globally
-global.fetch = vi.fn()
-
-// Mock Request constructor
-global.Request = vi.fn().mockImplementation((url, options) => ({
-  url,
-  method: options?.method || "GET",
-  headers: options?.headers || {},
-  body: options?.body,
-  json: () => Promise.resolve(JSON.parse(options?.body || "{}")),
-}))
-
-// Mock Response constructor
-global.Response = vi.fn().mockImplementation((body, options) => ({
-  ok: !options?.status || options.status < 400,
-  status: options?.status || 200,
-  json: () => Promise.resolve(typeof body === "string" ? JSON.parse(body) : body),
-}))
+// Mock console methods to reduce noise in tests
+global.console = {
+  ...console,
+  log: vi.fn(),
+  error: vi.fn(),
+  warn: vi.fn(),
+  info: vi.fn(),
+}

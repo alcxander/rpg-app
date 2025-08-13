@@ -1,13 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
-
-import { useCallback } from "react"
-
-import { useMemo } from "react"
-
-import { useState } from "react"
-
+import { useEffect, useState, useCallback, useMemo } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -41,16 +34,7 @@ import StatBlock from "@/components/StatBlock"
 import { useSessionChat } from "@/hooks/useSessionChat"
 import { useRealtimeSession } from "@/hooks/useRealtimeSession"
 
-import type { Battle, LootResult, MapToken } from "@/types"
-
-interface Campaign {
-  id: string
-  name: string
-  owner_id: string
-  is_owner: boolean
-  is_member: boolean
-  member_role: string | null
-}
+import type { Battle, LootResult, MapToken, Campaign } from "@/types"
 
 export default function HomePage() {
   const { user } = useUser()
@@ -79,10 +63,10 @@ export default function HomePage() {
   const memoMap = useMemo(() => sessionState?.map ?? null, [sessionState?.map])
 
   // Convert a battle's monsters/allies into MapToken[] snapshot
-  const tokensFromBattle = useCallback((battle: any): MapToken[] => {
+  const tokensFromBattle = useCallback((battle: Battle): MapToken[] => {
     if (!battle?.entities) return []
 
-    return battle.entities.map((entity: any, index: number) => ({
+    return battle.entities.map((entity, index) => ({
       id: `${entity.name}-${index}`,
       name: entity.name,
       x: 100 + index * 60,

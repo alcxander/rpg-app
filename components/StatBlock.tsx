@@ -1,48 +1,89 @@
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { MapToken } from '@/lib/types';
-import { cn } from '@/lib/utils'; // Import cn
+"use client"
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
+import type { BattleEntity } from "@/types"
 
 interface StatBlockProps {
-  name: string;
-  stats: Record<string, any>;
-  type?: 'monster' | 'pc';
+  creature: BattleEntity
 }
 
-export function StatBlock({ name, stats, type = 'monster' }: StatBlockProps) {
-  console.log('StatBlock: Component rendered with name:', name, 'stats:', stats, 'type:', type);
+export default function StatBlock({ creature }: StatBlockProps) {
+  const stats = creature.stats || {}
+
   return (
-    <Card className={cn("bg-gray-800 text-white border-gray-700 shadow-lg", type === 'monster' ? 'border-red-500' : 'border-blue-500')}> {/* Example usage of cn */}
-      <CardHeader className="pb-2">
-        <CardTitle className="text-xl font-bold text-purple-400">{name}</CardTitle>
-        <p className="text-sm text-gray-400 capitalize">{type}</p>
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between">
+          {creature.name}
+          <Badge variant={creature.type === "ally" ? "default" : "destructive"}>{creature.type}</Badge>
+        </CardTitle>
+        <CardDescription>Combat Statistics</CardDescription>
       </CardHeader>
-      <CardContent className="text-sm">
-        {Object.entries(stats).map(([key, value]) => {
-          return (
-            <div key={key} className="flex justify-between py-1 border-b border-gray-700 last:border-b-0">
-              <span className="font-semibold text-gray-300">{key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:</span>
-              <span className="text-gray-200">
-                {(() => {
-                  try {
-                    if (value === null || value === undefined) {
-                      return 'N/A';
-                    }
-                    if (typeof value === 'object') {
-                      // Attempt to stringify, catch errors
-                      return JSON.stringify(value);
-                    }
-                    // For primitive types, directly convert to string
-                    return String(value);
-                  } catch (e) {
-                    console.error(`StatBlock: Error rendering stat value for key "${key}" with value:`, value, e);
-                    return '[Error Rendering Stat]';
-                  }
-                })()}
-              </span>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <div className="text-sm font-medium">Hit Points</div>
+            <div className="text-lg">
+              {creature.hp}/{creature.max_hp}
             </div>
-          );
-        })}
+          </div>
+          <div>
+            <div className="text-sm font-medium">Armor Class</div>
+            <div className="text-lg">{creature.ac}</div>
+          </div>
+        </div>
+
+        <Separator />
+
+        <div className="grid grid-cols-3 gap-4">
+          <div>
+            <div className="text-sm font-medium">STR</div>
+            <div className="text-center">{stats.strength || 10}</div>
+          </div>
+          <div>
+            <div className="text-sm font-medium">DEX</div>
+            <div className="text-center">{stats.dexterity || 10}</div>
+          </div>
+          <div>
+            <div className="text-sm font-medium">CON</div>
+            <div className="text-center">{stats.constitution || 10}</div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-4">
+          <div>
+            <div className="text-sm font-medium">INT</div>
+            <div className="text-center">{stats.intelligence || 10}</div>
+          </div>
+          <div>
+            <div className="text-sm font-medium">WIS</div>
+            <div className="text-center">{stats.wisdom || 10}</div>
+          </div>
+          <div>
+            <div className="text-sm font-medium">CHA</div>
+            <div className="text-center">{stats.charisma || 10}</div>
+          </div>
+        </div>
+
+        {stats.actions && (
+          <>
+            <Separator />
+            <div>
+              <div className="text-sm font-medium mb-2">Actions</div>
+              <div className="space-y-2">
+                {stats.actions.map((action: any, index: number) => (
+                  <div key={index} className="text-sm">
+                    <div className="font-medium">{action.name}</div>
+                    <div className="text-muted-foreground">{action.description}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
-  );
+  )
 }

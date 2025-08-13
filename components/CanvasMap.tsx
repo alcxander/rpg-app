@@ -1,93 +1,151 @@
 "use client"
 
+import type React from "react"
+
 import { useRef, useEffect, useState } from "react"
 import * as fabric from "fabric"
-import type { MapData, MapToken } from "@/lib/types"
+import type { MapToken } from "@/types"
 
 interface CanvasMapProps {
-  mapData: MapData | null
-  isDM: boolean
-  onTokenMove: (tokenId: string, x: number, y: number) => void
-  highlightTokenId?: string | null
+  mapUrl: string | null
+  tokens: MapToken[]
+  onTokensUpdate: (tokens: MapToken[]) => void
+  width: number
+  height: number
 }
 
-const MIN_ZOOM = 0.5
-const MAX_ZOOM = 3
-const ZOOM_STEP = 1.05
-const CELL_SIZE = 50
-
-async function loadManifest(path: string): Promise<string[]> {
-  try {
-    const res = await fetch(path, { cache: "no-store" })
-    if (!res.ok) return []
-    const data = await res.json()
-    return Array.isArray(data) ? data : []
-  } catch {
-    return []
-  }
-}
-
-function isCrossOrigin(url: string) {
-  try {
-    if (url.startsWith("data:")) return false
-    const u = new URL(url, window.location.origin)
-    return u.origin !== window.location.origin
-  } catch {
-    return false
-  }
-}
-
-async function loadImageSafe(url: string): Promise<any> {
-  return await fabric.Image.fromURL(url, isCrossOrigin(url) ? { crossOrigin: "anonymous" as const } : undefined)
-}
-
-export default function CanvasMap({ mapData, isDM, onTokenMove, highlightTokenId = null }: CanvasMapProps) {
-  const containerRef = useRef<HTMLDivElement>(null)
+export default function CanvasMap({ mapUrl, tokens, onTokensUpdate, width, height }: CanvasMapProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [draggedToken, setDraggedToken] = useState<string | null>(null)
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
   const canvasElRef = useRef<HTMLCanvasElement>(null)
-  const canvasRef = useRef<fabric.Canvas | null>(null)
-
-  const tokenGroupsRef = useRef<
-    Map<string, fabric.Group & { tokenMeta?: { id: string; type?: "monster" | "pc" }; _border?: fabric.Circle }>
-  >(new Map())
+  const canvasRefFabric = useRef<fabric.Canvas | null>(null)
+  const tokenGroupsRef = useRef<Map<string, fabric.Group>>(new Map())
   const bgImageObjRef = useRef<any>(null)
-
   const [size, setSize] = useState({ width: 0, height: 0 })
   const isDraggingRef = useRef(false)
   const lastPosRef = useRef({ x: 0, y: 0 })
   const panningModeRef = useRef(false)
-
-  const enemiesManifestRef = useRef<string[] | null>(null)
-  const playersManifestRef = useRef<string[] | null>(null)
-  const mapsManifestRef = useRef<string[] | null>(null)
-
   const gridDrawnRef = useRef(false)
   const viewportFittedRef = useRef(false)
-  const onTokenMoveRef = useRef(onTokenMove)
-  useEffect(() => {
-    onTokenMoveRef.current = onTokenMove
-  }, [onTokenMove])
 
-  const currentMapData: MapData = mapData || {
-    session_id: "",
-    grid_size: 20,
-    terrain_data: {},
-    tokens: [],
-    background_image: null,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+  const CELL_SIZE = 50
+  const MIN_ZOOM = 0.5
+  const MAX_ZOOM = 3
+  const ZOOM_STEP = 1.05
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height)
+
+    // Draw background map if available
+    if (mapUrl) {
+      const img = new Image()
+      img.crossOrigin = "anonymous"
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, width, height)
+        drawTokens(ctx)
+      }
+      img.src = mapUrl
+    } else {
+      // Draw grid background
+      drawGrid(ctx)
+      drawTokens(ctx)
+    }
+  }, [mapUrl, tokens, width, height])
+
+  const drawGrid = (ctx: CanvasRenderingContext2D) => {
+    const gridSize = 40
+    ctx.strokeStyle = "#e5e7eb"
+    ctx.lineWidth = 1
+
+    // Draw vertical lines
+    for (let x = 0; x <= width; x += gridSize) {
+      ctx.beginPath()
+      ctx.moveTo(x, 0)
+      ctx.lineTo(x, height)
+      ctx.stroke()
+    }
+
+    // Draw horizontal lines
+    for (let y = 0; y <= height; y += gridSize) {
+      ctx.beginPath()
+      ctx.moveTo(0, y)
+      ctx.lineTo(width, y)
+      ctx.stroke()
+    }
   }
-  const tokenIdsKey = (currentMapData.tokens || [])
-    .map((t) => String(t.id))
-    .sort()
-    .join(",")
 
-  const gridSize = currentMapData.grid_size || 20
-  const mapWidth = gridSize * CELL_SIZE
-  const mapHeight = gridSize * CELL_SIZE
+  const drawTokens = (ctx: CanvasRenderingContext2D) => {
+    tokens.forEach((token) => {
+      // Draw token circle
+      ctx.beginPath()
+      ctx.arc(token.x, token.y, 20, 0, 2 * Math.PI)
+      ctx.fillStyle = token.isPlayer ? "#3b82f6" : "#ef4444"
+      ctx.fill()
+      ctx.strokeStyle = "#000"
+      ctx.lineWidth = 2
+      ctx.stroke()
 
-  // Observe container size only
+      // Draw token name
+      ctx.fillStyle = "#fff"
+      ctx.font = "12px Arial"
+      ctx.textAlign = "center"
+      ctx.fillText(token.name.substring(0, 3), token.x, token.y + 4)
+    })
+  }
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const rect = canvas.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+
+    // Find clicked token
+    const clickedToken = tokens.find((token) => {
+      const distance = Math.sqrt((x - token.x) ** 2 + (y - token.y) ** 2)
+      return distance <= 20
+    })
+
+    if (clickedToken) {
+      setDraggedToken(clickedToken.id)
+      setDragOffset({
+        x: x - clickedToken.x,
+        y: y - clickedToken.y,
+      })
+    }
+  }
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!draggedToken) return
+
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const rect = canvas.getBoundingClientRect()
+    const x = e.clientX - rect.left - dragOffset.x
+    const y = e.clientY - rect.top - dragOffset.y
+
+    const updatedTokens = tokens.map((token) => (token.id === draggedToken ? { ...token, x, y } : token))
+
+    onTokensUpdate(updatedTokens)
+  }
+
+  const handleMouseUp = () => {
+    setDraggedToken(null)
+    setDragOffset({ x: 0, y: 0 })
+  }
+
   useEffect(() => {
-    const el = containerRef.current
+    const el = canvasRef.current
     if (!el) return
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -99,7 +157,6 @@ export default function CanvasMap({ mapData, isDM, onTokenMove, highlightTokenId
     return () => ro.disconnect()
   }, [])
 
-  // Spacebar panning
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === "Space") panningModeRef.current = true
@@ -115,14 +172,13 @@ export default function CanvasMap({ mapData, isDM, onTokenMove, highlightTokenId
     }
   }, [])
 
-  // Create canvas and attach handlers ONCE
   useEffect(() => {
     if (!canvasElRef.current) return
     const c = new fabric.Canvas(canvasElRef.current, {
       selection: false,
       backgroundColor: "#111827",
     })
-    canvasRef.current = c
+    canvasRefFabric.current = c
 
     c.on("mouse:down", (opt: any) => {
       const e = opt?.e as MouseEvent | TouchEvent | undefined
@@ -189,7 +245,6 @@ export default function CanvasMap({ mapData, isDM, onTokenMove, highlightTokenId
       e.stopPropagation()
     })
 
-    // Snap and emit on end
     c.on("object:moving", (e) => {
       const obj = e.target
       if (!obj) return
@@ -198,20 +253,24 @@ export default function CanvasMap({ mapData, isDM, onTokenMove, highlightTokenId
         top: Math.round((obj.top || 0) / CELL_SIZE) * CELL_SIZE,
       })
     })
+
     c.on("object:modified", (e) => {
       const obj = e.target as (fabric.Group & { tokenMeta?: { id: string } }) | undefined
       if (!obj?.tokenMeta) return
       const newX = Math.round((obj.left || 0) / CELL_SIZE)
       const newY = Math.round((obj.top || 0) / CELL_SIZE)
-      onTokenMoveRef.current?.(obj.tokenMeta.id, newX, newY)
+      const updatedTokens = tokens.map((token) =>
+        token.id === obj.tokenMeta.id ? { ...token, x: newX, y: newY } : token,
+      )
+      onTokensUpdate(updatedTokens)
       obj.set({ left: newX * CELL_SIZE, top: newY * CELL_SIZE })
-      canvasRef.current?.requestRenderAll()
+      canvasRefFabric.current?.requestRenderAll()
     })
     ;(c as any).upperCanvasEl && ((c as any).upperCanvasEl.oncontextmenu = (e: Event) => e.preventDefault())
 
     return () => {
       c.dispose()
-      canvasRef.current = null
+      canvasRefFabric.current = null
       tokenGroupsRef.current.clear()
       bgImageObjRef.current = null
       gridDrawnRef.current = false
@@ -219,315 +278,38 @@ export default function CanvasMap({ mapData, isDM, onTokenMove, highlightTokenId
     }
   }, [])
 
-  // Only update canvas pixel size; never dispose here
   useEffect(() => {
-    const c = canvasRef.current
-    if (!c || size.width === 0 || size.height === 0) return
-    c.setDimensions({ width: size.width, height: size.height })
+    const c = canvasRefFabric.current
+    if (!c || width === 0 || height === 0) return
+    c.setDimensions({ width, height })
 
-    // Fit & center viewport ONCE when size becomes available
     if (!viewportFittedRef.current) {
-      const scaleFit = Math.min((size.width || 1) / mapWidth, (size.height || 1) / mapHeight)
+      const scaleFit = Math.min(width / (tokens.length * CELL_SIZE), height / (tokens.length * CELL_SIZE))
       const zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, scaleFit))
       c.setZoom(zoom)
       const vpt = c.viewportTransform
       if (vpt) {
-        vpt[4] = (size.width - mapWidth * zoom) / 2
-        vpt[5] = (size.height - mapHeight * zoom) / 2
+        vpt[4] = (width - tokens.length * CELL_SIZE * zoom) / 2
+        vpt[5] = (height - tokens.length * CELL_SIZE * zoom) / 2
       }
       viewportFittedRef.current = true
     }
     c.requestRenderAll()
-  }, [size.width, size.height, mapWidth, mapHeight])
-
-  function choose<T>(arr: T[], fallback: T): T {
-    return arr.length ? arr[Math.floor(Math.random() * arr.length)] : fallback
-  }
-
-  // Token visual
-  const buildTokenVisual = async (token: MapToken): Promise<fabric.Object> => {
-    let url = token.image
-    if (!url) {
-      const pool = token.type === "monster" ? enemiesManifestRef.current || [] : playersManifestRef.current || []
-      url = choose(pool, "/placeholder.svg?height=100&width=100")
-    }
-
-    const img: any = await loadImageSafe(url).catch(() => null)
-
-    const radius = CELL_SIZE / 2
-    if (!img) {
-      // fallback colored circle
-      return new fabric.Circle({ left: 0, top: 0, radius, fill: token.type === "monster" ? "#b91c1c" : "#1d4ed8" })
-    }
-
-    const iw = img.width || 1
-    const ih = img.height || 1
-    const scale = Math.max(CELL_SIZE / iw, CELL_SIZE / ih)
-    img.set({ left: 0, top: 0, scaleX: scale, scaleY: scale })
-
-    // circular clip
-    const clip = new fabric.Circle({ radius, left: radius, top: radius, originX: "center", originY: "center" })
-    ;(clip as any).absolutePositioned = false
-    img.set("clipPath", clip)
-
-    return img
-  }
-
-  const upsertTokenGroup = async (token: MapToken, c: fabric.Canvas) => {
-    const existing = tokenGroupsRef.current.get(String(token.id))
-    const left = token.x * CELL_SIZE
-    const top = token.y * CELL_SIZE
-    const radius = CELL_SIZE / 2
-
-    if (existing) {
-      existing.set({ left, top })
-      existing.setCoords()
-      return
-    }
-
-    let visual: fabric.Object
-    try {
-      visual = await buildTokenVisual(token)
-    } catch {
-      visual = new fabric.Circle({ left: 0, top: 0, radius, fill: token.type === "monster" ? "#b91c1c" : "#1d4ed8" })
-    }
-
-    visual.set({ left: 0, top: 0, selectable: isDM, evented: isDM })
-
-    const border = new fabric.Circle({
-      radius,
-      left: radius,
-      top: radius,
-      originX: "center",
-      originY: "center",
-      fill: "transparent",
-      stroke: token.type === "monster" ? "#7f1d1d" : "#1e3a8a",
-      strokeWidth: 3,
-      selectable: false,
-      evented: false,
-    })
-
-    const group = new fabric.Group([visual, border], {
-      left,
-      top,
-      width: CELL_SIZE,
-      height: CELL_SIZE,
-      hasControls: false,
-      hasBorders: false,
-      lockRotation: true,
-      lockScalingX: true,
-      lockScalingY: true,
-      selectable: isDM,
-      evented: isDM,
-      shadow: undefined,
-    }) as fabric.Group & { tokenMeta?: { id: string; type?: "monster" | "pc" }; _border?: fabric.Circle }
-
-    group.tokenMeta = { id: String(token.id), type: token.type }
-    group._border = border
-
-    try {
-      c.add(group)
-      tokenGroupsRef.current.set(String(token.id), group)
-    } catch (e) {
-      console.error("upsertTokenGroup: add failed", e)
-    }
-  }
-
-  const drawGrid = (c: fabric.Canvas) => {
-    for (let i = 0; i <= gridSize; i++) {
-      c.add(
-        new fabric.Line([i * CELL_SIZE, 0, i * CELL_SIZE, mapHeight], {
-          stroke: "#374151",
-          strokeWidth: 1,
-          selectable: false,
-          evented: false,
-        }),
-      )
-      c.add(
-        new fabric.Line([0, i * CELL_SIZE, mapWidth, i * CELL_SIZE], {
-          stroke: "#374151",
-          strokeWidth: 1,
-          selectable: false,
-          evented: false,
-        }),
-      )
-    }
-  }
-
-  async function resolveBackgroundCandidate(): Promise<string> {
-    const manifestChoice =
-      mapsManifestRef.current && mapsManifestRef.current.length
-        ? mapsManifestRef.current[Math.floor(Math.random() * mapsManifestRef.current.length)]
-        : "/placeholder.svg?height=800&width=800"
-    return currentMapData.background_image || manifestChoice
-  }
-
-  async function loadBackground(c: fabric.Canvas) {
-    const candidate = await resolveBackgroundCandidate()
-    const candidates: string[] = [candidate]
-
-    if (mapsManifestRef.current?.length) {
-      const shuffled = [...mapsManifestRef.current].sort(() => Math.random() - 0.5).slice(0, 2)
-      for (const u of shuffled) if (!candidates.includes(u)) candidates.push(u)
-    }
-    candidates.push("/placeholder.svg?height=800&width=800")
-
-    let fImg: any = null
-    for (const url of candidates) {
-      try {
-        fImg = await loadImageSafe(url)
-        if (fImg) break
-      } catch {
-        // try next
-      }
-    }
-    if (!fImg) return
-
-    const iw = fImg.width || (fImg as any)?.getElement?.()?.naturalWidth || 1
-    const ih = fImg.height || (fImg as any)?.getElement?.()?.naturalHeight || 1
-    const scale = Math.max(mapWidth / iw, mapHeight / ih)
-    fImg.set({
-      left: 0,
-      top: 0,
-      selectable: false,
-      evented: false,
-      scaleX: scale,
-      scaleY: scale,
-    })
-
-    // Remove previous bg if any, then add and send behind WITHOUT clearing canvas
-    if (bgImageObjRef.current) {
-      try {
-        c.remove(bgImageObjRef.current)
-      } catch {}
-      bgImageObjRef.current = null
-    }
-
-    c.add(fImg)
-    if (typeof (fImg as any).sendToBack === "function") {
-      ;(fImg as any).sendToBack()
-    }
-    bgImageObjRef.current = fImg
-    c.requestRenderAll()
-  }
-
-  // STATIC: manifests, grid, initial tokens — only when set changes
-  useEffect(() => {
-    const c = canvasRef.current
-    if (!c) return
-    let cancelled = false
-
-    const setupStatic = async () => {
-      if (!enemiesManifestRef.current) enemiesManifestRef.current = await loadManifest("/tokens/enemies/manifest.json")
-      if (!playersManifestRef.current) playersManifestRef.current = await loadManifest("/tokens/players/manifest.json")
-      if (!mapsManifestRef.current) mapsManifestRef.current = await loadManifest("/maps/manifest.json")
-
-      if (!gridDrawnRef.current) {
-        c.backgroundColor = "#111827"
-        drawGrid(c)
-        gridDrawnRef.current = true
-      }
-
-      // Remove groups for removed IDs
-      const wantedIds = new Set((currentMapData.tokens || []).map((t) => String(t.id)))
-      tokenGroupsRef.current.forEach((g, id) => {
-        if (!wantedIds.has(id)) {
-          try {
-            c.remove(g)
-          } catch {}
-          tokenGroupsRef.current.delete(id)
-        }
-      })
-
-      // Upsert groups for current tokens
-      for (const t of currentMapData.tokens || []) {
-        if (cancelled) return
-        await upsertTokenGroup(t, c)
-      }
-
-      c.requestRenderAll()
-    }
-
-    setupStatic()
-    return () => {
-      cancelled = true
-    }
-  }, [tokenIdsKey, gridSize, mapWidth, mapHeight, isDM, currentMapData.tokens])
-
-  // Background: only if image or grid size changes
-  useEffect(() => {
-    const c = canvasRef.current
-    if (!c) return
-    loadBackground(c).catch((err) => {
-      console.error("background load failed", err)
-    })
-  }, [currentMapData.background_image, gridSize])
-
-  // Positions-only update
-  useEffect(() => {
-    const c = canvasRef.current
-    if (!c) return
-    const tokens = currentMapData.tokens || []
-    for (const t of tokens) {
-      const g = tokenGroupsRef.current.get(String(t.id))
-      const desiredLeft = t.x * CELL_SIZE
-      const desiredTop = t.y * CELL_SIZE
-      if (g && (g.left !== desiredLeft || g.top !== desiredTop)) {
-        g.set({ left: desiredLeft, top: desiredTop })
-        g.setCoords()
-      }
-    }
-    c.requestRenderAll()
-  }, [currentMapData.tokens])
-
-  // Highlight token by id (stronger highlight)
-  useEffect(() => {
-    const c = canvasRef.current
-    if (!c) return
-    tokenGroupsRef.current.forEach((g) => {
-      // reset shadow
-      g.set({ shadow: undefined })
-      // reset ring color/width
-      const t = g.tokenMeta?.type
-      if (g._border) {
-        g._border.set({
-          stroke: t === "monster" ? "#7f1d1d" : "#1e3a8a",
-          strokeWidth: 3,
-        })
-      }
-    })
-    if (!highlightTokenId) {
-      c.requestRenderAll()
-      return
-    }
-    const g = tokenGroupsRef.current.get(String(highlightTokenId))
-    if (!g) return
-    g.set({
-      shadow: new fabric.Shadow({
-        color: "rgba(251, 191, 36, 0.95)", // stronger amber glow
-        blur: 45,
-        offsetX: 0,
-        offsetY: 0,
-      }),
-    })
-    if (g._border) {
-      g._border.set({
-        stroke: "#f59e0b", // amber ring
-        strokeWidth: 6,
-      })
-    }
-    if (typeof (g as any).bringToFront === "function") {
-      ;(g as any).bringToFront()
-    }
-    c.requestRenderAll()
-  }, [highlightTokenId])
+  }, [width, height, tokens])
 
   return (
-    <div ref={containerRef} className="flex-1 h-full bg-gray-900 rounded-lg overflow-hidden relative">
+    <div className="border rounded-lg overflow-hidden">
+      <canvas
+        ref={canvasRef}
+        width={width}
+        height={height}
+        className="cursor-pointer"
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+      />
       <canvas ref={canvasElRef} />
-      <div className="absolute left-2 bottom-2 text-[11px] text-gray-300 bg-gray-800/70 px-2 py-1 rounded">
-        Hold Space and drag, or middle/right-drag to pan. Scroll to zoom.
-      </div>
     </div>
   )
 }

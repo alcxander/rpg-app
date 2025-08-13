@@ -41,7 +41,13 @@ export async function GET(request: NextRequest) {
     }
 
     const isOwner = campaign.owner_id === user.id
-    console.log("[players/gold] Ownership check:", { isOwner, campaignOwnerId: campaign.owner_id, userId: user.id })
+    console.log("[players/gold] Ownership check:", {
+      isOwner,
+      campaignOwnerId: campaign.owner_id,
+      userId: user.id,
+      userIdType: typeof user.id,
+      ownerIdType: typeof campaign.owner_id,
+    })
 
     // If not owner, check membership
     let isMember = false
@@ -124,11 +130,7 @@ export async function GET(request: NextRequest) {
         .select(`
           user_id,
           role,
-          joined_at,
-          users!inner(
-            clerk_id,
-            name
-          )
+          joined_at
         `)
         .eq("campaign_id", campaignId)
 
@@ -138,6 +140,17 @@ export async function GET(request: NextRequest) {
       }
 
       console.log("[players/gold] Members found:", membersData?.length || 0)
+
+      // Get user profiles for all members
+      const memberIds = membersData?.map((m) => m.user_id) || []
+      const { data: profilesData, error: profilesError } = await supabaseAdmin
+        .from("users")
+        .select("clerk_id, name")
+        .in("clerk_id", memberIds)
+
+      if (profilesError) {
+        console.error("[players/gold] Error fetching profiles:", profilesError)
+      }
 
       // Get gold data for all members
       const { data: goldData, error: goldError } = await supabaseAdmin
@@ -154,11 +167,12 @@ export async function GET(request: NextRequest) {
 
       // Combine member and gold data
       const combinedData = (membersData || []).map((member) => {
+        const profile = profilesData?.find((p) => p.clerk_id === member.user_id)
         const goldRecord = goldData?.find((g) => g.player_id === member.user_id)
         return {
           player_id: member.user_id,
-          player_clerk_id: member.users.clerk_id,
-          player_name: member.users.name || "Unknown",
+          player_clerk_id: member.user_id,
+          player_name: profile?.name || "Unknown Player",
           role: member.role,
           joined_at: member.joined_at,
           gold_amount: goldRecord?.gold_amount || 0,
@@ -184,7 +198,7 @@ export async function GET(request: NextRequest) {
           player_id: campaign.owner_id,
           player_clerk_id: campaign.owner_id,
           player_name: ownerProfile?.name || "Campaign Owner",
-          role: "Owner",
+          role: "owner",
           joined_at: new Date().toISOString(),
           gold_amount: ownerGold.gold_amount || 0,
         })

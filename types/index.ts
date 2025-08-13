@@ -20,7 +20,7 @@ export interface Shopkeeper {
   removed?: boolean
   removed_at?: string | null
   created_at: string
-  inventory?: ShopkeeperInventoryItem[]
+  inventory: ShopkeeperInventoryItem[]
 }
 
 export interface ShopkeeperInventoryItem {
@@ -38,15 +38,84 @@ export interface ShopkeeperInventoryItem {
 export interface SessionOption {
   id: string
   campaign_id: string
+  name: string
   created_at: string
 }
 
 export interface MapToken {
   id: string
-  type: "monster" | "pc"
   name: string
-  image: string
-  stats: Record<string, any>
   x: number
   y: number
+  imageUrl: string
+  isPlayer: boolean
+  hp: number
+  maxHp: number
+  ac: number
+  initiativeOrder: number
+}
+
+export interface Battle {
+  id: string
+  session_id: string
+  name: string
+  entities: BattleEntity[]
+  map_url?: string
+  created_at: string
+}
+
+export interface BattleEntity {
+  id: string
+  name: string
+  type: "monster" | "ally"
+  hp: number
+  max_hp: number
+  ac: number
+  initiative_order: number
+  token_image?: string
+  stats?: Record<string, any>
+}
+
+export interface LootResult {
+  id: string
+  session_id: string
+  items: LootItem[]
+  generated_at: string
+}
+
+export interface LootItem {
+  name: string
+  description: string
+  rarity: string
+  value: number
+  quantity: number
+}
+
+export interface Campaign {
+  id: string
+  name: string
+  owner_id: string
+  is_owner: boolean
+  is_member: boolean
+  member_role: string | null
+  access_enabled?: boolean
+  created_at: string
+}
+
+export interface User {
+  id: string
+  clerk_id: string
+  name: string
+  email?: string
+  created_at: string
+}
+
+export interface PlayerGold {
+  player_id: string
+  campaign_id: string
+  gold_amount: number
+  player_name?: string
+  player_clerk_id?: string
+  role?: string
+  joined_at?: string
 }

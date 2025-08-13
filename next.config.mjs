@@ -1,14 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    serverComponentsExternalPackages: ['fabric']
-  },
   webpack: (config) => {
     config.externals.push({
-      'utf-8-validate': 'commonjs utf-8-validate',
-      'bufferutil': 'commonjs bufferutil',
-    });
-    return config;
+      'fabric': 'fabric'
+    })
+    return config
   },
   eslint: {
     ignoreDuringBuilds: true,
@@ -17,8 +13,9 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   images: {
+    domains: ['localhost'],
     unoptimized: true,
   },
-};
+}
 
-export default nextConfig;
+export default nextConfig

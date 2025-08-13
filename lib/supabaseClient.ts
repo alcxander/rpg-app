@@ -1,20 +1,20 @@
 // lib/supabaseClient.ts
-import { createClient, type SupabaseClient } from "@supabase/supabase-js"
-import type { Database } from "./database.types.ts"
+import { createClient as createSupabaseClient, type SupabaseClient } from "@supabase/supabase-js"
+import type { Database } from "./database.types"
 
 // Single client instance to avoid multiple GoTrueClient warnings
 let browserClientSingleton: SupabaseClient<Database> | null = null
 // We inject the Clerk JWT into every REST request via a custom fetch
 let currentAuthToken: string | null = null
 
-export const createBrowserClient = () => {
+export const createClient = () => {
   if (!browserClientSingleton) {
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
       throw new Error(
         "Missing Supabase client-side environment variables: NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY",
       )
     }
-    browserClientSingleton = createClient<Database>(
+    browserClientSingleton = createSupabaseClient<Database>(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       {
@@ -40,8 +40,10 @@ export const createBrowserClient = () => {
   return browserClientSingleton
 }
 
+export const createBrowserClient = createClient
+
 export const createBrowserClientWithToken = (token: string) => {
-  const client = createBrowserClient()
+  const client = createClient()
   // Store token for REST and update Realtime
   currentAuthToken = token
   try {

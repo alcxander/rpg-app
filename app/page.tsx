@@ -301,7 +301,7 @@ export default function HomePage() {
   }, [selectedCampaignId, fetchSessions])
 
   useEffect(() => {
-    if (!sessionLoading && sessionState.map) setShowMapCanvas(true)
+    if (!sessionLoading && sessionState?.map) setShowMapCanvas(true)
   }, [sessionState, sessionLoading])
 
   const handleTokenMove = useCallback(
@@ -312,7 +312,7 @@ export default function HomePage() {
     [moveTokenAndLog],
   )
 
-  const memoMap = useMemo(() => sessionState.map ?? null, [sessionState.map])
+  const memoMap = useMemo(() => sessionState?.map ?? null, [sessionState?.map])
 
   // Convert a battle's monsters/allies into MapToken[] snapshot
   const tokensFromBattle = useCallback((battle: any): MapToken[] => {
@@ -403,7 +403,7 @@ export default function HomePage() {
   )
 
   const onSelectBattle = (battleId: string) => {
-    const b: any = sessionState.battles.find((x) => x.id === battleId) || null
+    const b: any = sessionState?.battles?.find((x) => x.id === battleId) || null
     if (!b) return
     const tokens = tokensFromBattle(b)
     setSessionState((prev) => ({
@@ -421,8 +421,8 @@ export default function HomePage() {
     }))
   }
 
-  const currentMonsters = sessionState.map?.tokens.filter((t) => t.type === "monster") || []
-  const currentPCs = sessionState.map?.tokens.filter((t) => t.type === "pc") || []
+  const currentMonsters = sessionState?.map?.tokens?.filter((t) => t.type === "monster") || []
+  const currentPCs = sessionState?.map?.tokens?.filter((t) => t.type === "pc") || []
 
   const onCreateCampaign = async () => {
     const name = newCampaignName.trim()
@@ -927,12 +927,12 @@ export default function HomePage() {
               </div>
               <div className="flex items-center gap-2 max-w-60">
                 <Label className="text-gray-300">Battles</Label>
-                <Select value={sessionState.battle?.id || ""} onValueChange={onSelectBattle}>
+                <Select value={sessionState?.battle?.id || ""} onValueChange={onSelectBattle}>
                   <SelectTrigger className="bg-gray-700 border-gray-600 text-white w-full max-w-full">
                     <SelectValue placeholder="Select battle" />
                   </SelectTrigger>
                   <SelectContent className="bg-gray-800 text-white border-gray-700 max-h-64">
-                    {sessionState.battles.map((b) => (
+                    {(sessionState?.battles || []).map((b) => (
                       <SelectItem key={b.id} value={b.id}>
                         <div className="flex w-full min-w-0 items-center">
                           <span className="truncate max-w-[240px]">
@@ -949,15 +949,15 @@ export default function HomePage() {
 
             {/* Initiative above TokenList */}
             <Initiative
-              battle={sessionState.battle || null}
-              tokens={sessionState.map?.tokens || []}
+              battle={sessionState?.battle || null}
+              tokens={sessionState?.map?.tokens || []}
               onHighlightToken={(id) => setHighlightTokenId(id)}
             />
 
             <TokenList monsters={currentMonsters} pcs={currentPCs} onHoverToken={(id) => setHighlightTokenId(id)} />
 
             <div className="h-64">
-              <ChatLog messages={sessionState.chatLog} title="Activity Log" />
+              <ChatLog messages={sessionState?.chatLog || []} title="Activity Log" />
             </div>
           </aside>
         </div>
@@ -1008,12 +1008,12 @@ export default function HomePage() {
           <div className="space-y-4">
             <div className="flex items-center gap-2">
               <Label className="text-gray-300">Battles</Label>
-              <Select value={sessionState.battle?.id || ""} onValueChange={onSelectBattle}>
+              <Select value={sessionState?.battle?.id || ""} onValueChange={onSelectBattle}>
                 <SelectTrigger className="bg-gray-700 border-gray-600 text-white w-full max-w-full">
                   <SelectValue placeholder="Select battle" />
                 </SelectTrigger>
                 <SelectContent className="bg-gray-800 text-white border-gray-700 max-h-64">
-                  {sessionState.battles.map((b) => (
+                  {(sessionState?.battles || []).map((b) => (
                     <SelectItem key={b.id} value={b.id}>
                       <div className="flex w-full min-w-0 items-center">
                         <span className="truncate max-w-[240px]">
@@ -1029,15 +1029,15 @@ export default function HomePage() {
 
             {/* Initiative above TokenList in details dialog */}
             <Initiative
-              battle={sessionState.battle || null}
-              tokens={sessionState.map?.tokens || []}
+              battle={sessionState?.battle || null}
+              tokens={sessionState?.map?.tokens || []}
               onHighlightToken={(id) => setHighlightTokenId(id)}
             />
 
             <TokenList monsters={currentMonsters} pcs={currentPCs} onHoverToken={(id) => setHighlightTokenId(id)} />
 
             <div className="h-64">
-              <ChatLog messages={sessionState.chatLog} title="Activity Log" />
+              <ChatLog messages={sessionState?.chatLog || []} title="Activity Log" />
             </div>
           </div>
           <DialogFooter>

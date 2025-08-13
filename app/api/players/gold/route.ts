@@ -2,8 +2,9 @@ import { type NextRequest, NextResponse } from "next/server"
 import { auth } from "@clerk/nextjs/server"
 import { createServerSupabaseClient, createAdminClient } from "@/lib/supabaseAdmin"
 
-// GET /api/players/gold?campaignId=...
-// DM-only read of all player gold for the campaign
+// GET /api/players/gold?campaignId=...&playerId=...
+// If playerId is provided: return that player's gold (for player view)
+// If no playerId: return all players' gold (DM-only view)
 export async function GET(req: NextRequest) {
   const { userId, getToken } = await auth()
   if (!userId || !getToken) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -19,24 +20,72 @@ export async function GET(req: NextRequest) {
   const supabase = createServerSupabaseClient(token)
   const adminSupabase = createAdminClient()
 
-  console.log("[api/players/gold] GET start:", { campaignId, playerId, userId: userId.substring(0, 12) + "..." })
+  console.log("[api/players/gold] GET start:", {
+    campaignId,
+    playerId,
+    userId: userId.substring(0, 12) + "...",
+    isPlayerView: !!playerId,
+  })
 
-  // If playerId is provided, return just that player's gold (for non-DMs)
+  // Player view: get specific player's gold
   if (playerId) {
-    const { data, error } = await supabase
+    console.log("[api/players/gold] Player view - fetching gold for:", playerId.substring(0, 12) + "...")
+
+    // Verify the requesting user is either the player themselves or the campaign owner
+    if (playerId !== userId) {
+      // Check if requesting user is the campaign owner
+      const { data: camp, error: cErr } = await supabase
+        .from("campaigns")
+        .select("owner_id")
+        .eq("id", campaignId)
+        .single()
+
+      if (cErr || !camp || camp.owner_id !== userId) {
+        console.error("[api/players/gold] Access denied - not player or owner:", {
+          playerId,
+          userId,
+          campaignOwner: camp?.owner_id,
+        })
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      }
+    }
+
+    // Verify the player is a member of the campaign
+    const { data: membership, error: memberErr } = await adminSupabase
+      .from("campaign_members")
+      .select("id")
+      .eq("campaign_id", campaignId)
+      .eq("user_id", playerId)
+      .single()
+
+    if (memberErr || !membership) {
+      console.error("[api/players/gold] Player not a member:", { playerId, campaignId, error: memberErr })
+      return NextResponse.json({ error: "Player is not a member of this campaign" }, { status: 400 })
+    }
+
+    // Get the player's gold record using admin client
+    const { data: goldData, error: goldError } = await adminSupabase
       .from("players_gold")
       .select("player_id, gold_amount")
       .eq("campaign_id", campaignId)
       .eq("player_id", playerId)
+      .maybeSingle()
 
-    if (error) {
-      console.error("[api/players/gold] Failed to load player gold:", error)
+    if (goldError) {
+      console.error("[api/players/gold] Failed to load player gold:", goldError)
       return NextResponse.json({ error: "Failed to load gold" }, { status: 500 })
     }
-    return NextResponse.json({ rows: data || [] })
+
+    const result = goldData ? [goldData] : [{ player_id: playerId, gold_amount: 0 }]
+    console.log("[api/players/gold] Player gold result:", result)
+
+    return NextResponse.json({ rows: result })
   }
 
-  // For DMs, verify ownership first
+  // DM view: get all players' gold
+  console.log("[api/players/gold] DM view - fetching all players gold")
+
+  // Verify DM ownership
   const { data: camp, error: cErr } = await supabase
     .from("campaigns")
     .select("id, owner_id")

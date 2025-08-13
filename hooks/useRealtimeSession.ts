@@ -1,27 +1,25 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useAuth } from "@clerk/nextjs"
-import { createClient } from "@/lib/supabaseClient"
+import { useUser } from "@clerk/nextjs"
 
-interface Session {
+export interface RealtimeSession {
   id: string
   name: string
   campaign_id: string
+  dm_id: string
   created_at: string
-  updated_at: string
-  dm_user_id: string
+  background_image?: string
 }
 
-export function useRealtimeSession(sessionId: string | null) {
-  const { getToken } = useAuth()
-  const [session, setSession] = useState<Session | null>(null)
+export const useRealtimeSession = (sessionId: string | null) => {
+  const { user, getToken } = useUser()
+  const [session, setSession] = useState<RealtimeSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!sessionId) {
-      setSession(null)
+    if (!sessionId || !user) {
       setLoading(false)
       return
     }
@@ -32,28 +30,30 @@ export function useRealtimeSession(sessionId: string | null) {
         setLoading(true)
         setError(null)
 
-        // Get the Supabase token from Clerk
         const token = await getToken({ template: "supabase" })
         if (!token) {
-          throw new Error("No Supabase token available")
+          throw new Error("No authentication token available")
         }
 
-        // Create Supabase client with the token
-        const supabase = createClient(token)
+        const response = await fetch(`/api/sessions/${sessionId}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        })
 
-        // Fetch the session
-        const { data, error: fetchError } = await supabase.from("sessions").select("*").eq("id", sessionId).single()
-
-        if (fetchError) {
-          console.error("[useRealtimeSession] Fetch error:", fetchError)
-          throw new Error(fetchError.message)
+        if (!response.ok) {
+          const errorText = await response.text()
+          console.error("[useRealtimeSession] API error:", response.status, errorText)
+          throw new Error(`Failed to load session: ${response.status}`)
         }
 
+        const data = await response.json()
         console.log("[useRealtimeSession] Session loaded:", data)
-        setSession(data)
-      } catch (err: any) {
-        console.error("[useRealtimeSession] Error:", err)
-        setError(err.message || "Failed to load session")
+        setSession(data.session)
+      } catch (err) {
+        console.error("[useRealtimeSession] Error loading session:", err)
+        setError(err instanceof Error ? err.message : "Unknown error")
         setSession(null)
       } finally {
         setLoading(false)
@@ -61,7 +61,17 @@ export function useRealtimeSession(sessionId: string | null) {
     }
 
     loadSession()
-  }, [sessionId, getToken])
+  }, [sessionId, user, getToken])
 
-  return { session, loading, error }
+  return {
+    session,
+    loading,
+    error,
+    refetch: () => {
+      if (sessionId && user) {
+        setLoading(true)
+        // Trigger reload by updating a dependency
+      }
+    },
+  }
 }

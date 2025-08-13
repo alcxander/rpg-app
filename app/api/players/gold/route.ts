@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { currentUser } from "@clerk/nextjs/server"
-import { supabaseAdmin } from "@/lib/supabaseAdmin"
+import { createAdminClient } from "@/lib/supabaseAdmin"
 
 export async function GET(request: NextRequest) {
   console.log("[players/gold] GET request received")
@@ -25,6 +25,8 @@ export async function GET(request: NextRequest) {
     if (!campaignId) {
       return NextResponse.json({ error: "Campaign ID required" }, { status: 400 })
     }
+
+    const supabaseAdmin = createAdminClient()
 
     // Check if user has access to this campaign
     const { data: membership } = await supabaseAdmin
@@ -167,6 +169,8 @@ export async function POST(request: NextRequest) {
     if (!playerId || !campaignId || goldAmount === undefined) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
     }
+
+    const supabaseAdmin = createAdminClient()
 
     // Check if requesting user is campaign owner
     const { data: membership } = await supabaseAdmin

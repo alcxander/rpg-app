@@ -607,13 +607,13 @@ export default function ShopkeepersPage() {
                                   {it.rarity} • {it.final_price} gp • stock {it.stock_quantity}
                                 </div>
                               </div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-1">
                                 {isOwner ? (
                                   <>
                                     <Button
                                       size="sm"
                                       variant="secondary"
-                                      className="bg-gray-700 text-white"
+                                      className="bg-gray-700 text-white h-6 w-6 p-0"
                                       onClick={() => updateInventory(it.id, "decrement")}
                                       disabled={it.stock_quantity <= 0}
                                       title="Remove one (DM)"
@@ -623,7 +623,7 @@ export default function ShopkeepersPage() {
                                     <Button
                                       size="sm"
                                       variant="secondary"
-                                      className="bg-gray-700 text-white"
+                                      className="bg-gray-700 text-white h-6 w-6 p-0"
                                       onClick={() => updateInventory(it.id, "increment")}
                                       title="Add one (DM)"
                                     >
@@ -633,14 +633,14 @@ export default function ShopkeepersPage() {
                                 ) : (
                                   <Button
                                     size="sm"
-                                    className="bg-purple-600 hover:bg-purple-700 text-white"
+                                    className="bg-purple-600 hover:bg-purple-700 text-white h-6 px-2"
                                     onClick={() => purchaseItem(sk.id, it.id, it.final_price)}
                                     disabled={
                                       it.stock_quantity <= 0 || !campaignAccessEnabled || userGold < it.final_price
                                     }
                                     title="Buy 1"
                                   >
-                                    <ShoppingCart className="w-4 h-4 mr-1" /> Buy
+                                    <ShoppingCart className="w-3 h-3 mr-1" /> Buy
                                   </Button>
                                 )}
                               </div>
@@ -655,7 +655,7 @@ export default function ShopkeepersPage() {
             )}
           </TabsContent>
 
-          {/* Management Tab */}
+          {/* Management Tab - Only visible to DMs */}
           {isOwner && (
             <TabsContent value="management" className="mt-4">
               <Card className="bg-gray-800 border-gray-700 mb-4">
@@ -718,7 +718,7 @@ export default function ShopkeepersPage() {
             </TabsContent>
           )}
 
-          {/* Players Tab */}
+          {/* Players Tab - Only visible to DMs */}
           {isOwner && (
             <TabsContent value="players" className="mt-4">
               <Card className="bg-gray-800 border-gray-700">

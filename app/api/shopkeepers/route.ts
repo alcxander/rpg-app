@@ -40,11 +40,19 @@ export async function GET(req: NextRequest) {
 
     // Check if user has access to this campaign
     let hasAccess = false
+    let isOwner = false
     let accessReason = ""
 
     if (userId && campaign.owner_id === userId) {
       hasAccess = true
+      isOwner = true
       accessReason = "campaign owner"
+      console.log("[api/shopkeepers] GET user is campaign owner", {
+        reqId,
+        userId,
+        campaignOwnerId: campaign.owner_id,
+        isOwner: true,
+      })
     } else if (userId) {
       // Check if user is a member of the campaign
       const { data: membership, error: memberError } = await supabase
@@ -56,7 +64,14 @@ export async function GET(req: NextRequest) {
 
       if (membership) {
         hasAccess = true
+        isOwner = false
         accessReason = `campaign member (${membership.role})`
+        console.log("[api/shopkeepers] GET user is campaign member", {
+          reqId,
+          userId,
+          role: membership.role,
+          isOwner: false,
+        })
       } else if (memberError && memberError.code !== "PGRST116") {
         console.error("[api/shopkeepers] GET membership check error", { reqId, error: memberError })
       }
@@ -77,7 +92,7 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    console.log("[api/shopkeepers] GET access granted", { reqId, accessReason })
+    console.log("[api/shopkeepers] GET access granted", { reqId, accessReason, isOwner })
 
     // Get active shopkeepers (removed=false or null)
     const { data: shops, error: shopsErr } = await supabase
@@ -132,6 +147,7 @@ export async function GET(req: NextRequest) {
       campaignId,
       count: result.length,
       accessReason,
+      isOwner,
     })
 
     return NextResponse.json({
@@ -140,6 +156,7 @@ export async function GET(req: NextRequest) {
         name: campaign.name,
         hasAccess: true,
         accessReason,
+        isOwner: isOwner, // Make sure this is explicitly returned
       },
       shopkeepers: result,
     })

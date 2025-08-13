@@ -134,13 +134,25 @@ export default function ShopkeepersPage() {
       const { data, raw } = await parseJsonSafe(res)
       console.log("[shopkeepers.page] load shopkeepers: response", { ok: res.ok, status: res.status, len: raw.length })
       if (!res.ok) throw new Error(raw || "Failed to load shopkeepers")
+
       setShopkeepers(data.shopkeepers || [])
       setCampaignAccessEnabled(Boolean(data.campaign?.access_enabled))
-      setIsOwner(Boolean(data.campaign?.isOwner))
+
+      // Debug the isOwner value
+      const ownerStatus = Boolean(data.campaign?.isOwner)
+      console.log("[shopkeepers.page] ownership check", {
+        campaignData: data.campaign,
+        isOwner: ownerStatus,
+        userId: user?.id,
+        rawIsOwner: data.campaign?.isOwner,
+      })
+
+      setIsOwner(ownerStatus)
+
       console.log("[shopkeepers.page] load shopkeepers: set", {
         items: (data.shopkeepers || []).length,
         access: Boolean(data.campaign?.access_enabled),
-        isOwner: Boolean(data.campaign?.isOwner),
+        isOwner: ownerStatus,
       })
     } catch (e: any) {
       showError("Error loading shopkeepers", String(e?.message || e))
@@ -187,7 +199,14 @@ export default function ShopkeepersPage() {
   useEffect(() => {
     if (selectedCampaignId) {
       loadShopkeepers(selectedCampaignId)
+    }
+  }, [selectedCampaignId])
+
+  useEffect(() => {
+    if (selectedCampaignId && isOwner) {
       loadPlayersGold(selectedCampaignId)
+    }
+    if (selectedCampaignId && !isOwner) {
       loadUserGold(selectedCampaignId)
     }
   }, [selectedCampaignId, isOwner])
@@ -453,7 +472,13 @@ export default function ShopkeepersPage() {
       <div className="mx-auto max-w-7xl px-4 py-6">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl font-bold text-purple-400">Shopkeepers</h1>
+          <div className="flex items-center gap-4">
+            <h1 className="text-2xl font-bold text-purple-400">Shopkeepers</h1>
+            {/* Debug info */}
+            <div className="text-xs text-gray-500 bg-gray-800 px-2 py-1 rounded">
+              isOwner: {String(isOwner)} | userId: {user?.id?.substring(0, 8)}...
+            </div>
+          </div>
           <div className="flex gap-2 items-center">
             {!isOwner && (
               <div className="flex items-center gap-2 bg-yellow-600/20 px-3 py-2 rounded-lg border border-yellow-600/40">

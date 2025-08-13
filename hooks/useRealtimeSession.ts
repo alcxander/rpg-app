@@ -1,71 +1,64 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
-import { useUser } from "@clerk/nextjs"
-import { createBrowserClientWithToken } from "@/lib/supabaseClient"
+import { useState, useRef, useCallback } from "react"
 import type { RealtimeChannel } from "@supabase/supabase-js"
+import { createBrowserClientWithToken } from "@/lib/supabaseClient"
+import { useAuth } from "@clerk/nextjs"
 
 interface UseRealtimeSessionProps {
   sessionId: string | null
-  onParticipantsUpdate?: (participants: any[]) => void
-  onMessagesUpdate?: (messages: any[]) => void
+  onSessionUpdate?: (session: any) => void
+  onError?: (error: string) => void
 }
 
 interface UseRealtimeSessionReturn {
   isConnected: boolean
-  participants: any[]
-  messages: any[]
+  isJoining: boolean
+  error: string | null
   joinSession: () => Promise<void>
   leaveSession: () => void
-  sendMessage: (content: string) => Promise<void>
-  error: string | null
 }
 
 export function useRealtimeSession({
   sessionId,
-  onParticipantsUpdate,
-  onMessagesUpdate,
+  onSessionUpdate,
+  onError,
 }: UseRealtimeSessionProps): UseRealtimeSessionReturn {
-  const { user, getToken } = useUser()
   const [isConnected, setIsConnected] = useState(false)
-  const [participants, setParticipants] = useState<any[]>([])
-  const [messages, setMessages] = useState<any[]>([])
+  const [isJoining, setIsJoining] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const channelRef = useRef<RealtimeChannel | null>(null)
+  const { getToken } = useAuth()
 
   const joinSession = async () => {
     if (!sessionId) {
       setError("No session ID provided")
+      onError?.("No session ID provided")
       return
     }
 
-    if (!user || !getToken) {
-      setError("User not authenticated")
-      return
-    }
+    if (isJoining || isConnected) return
+
+    setIsJoining(true)
+    setError(null)
 
     try {
-      setError(null)
-
-      // Get the Clerk token and create Supabase client
+      // Get the Supabase token
       const token = await getToken({ template: "supabase" })
       if (!token) {
         throw new Error("Failed to get authentication token")
       }
 
+      // Create Supabase client with token
       const supabase = createBrowserClientWithToken(token)
 
-      // Join the session via API
+      // First, join the session via API
       const response = await fetch("/api/join-session", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          sessionId,
-          userId: user.id,
-          userName: user.fullName || user.firstName || "Unknown User",
-        }),
+        body: JSON.stringify({ sessionId }),
       })
 
       if (!response.ok) {
@@ -74,105 +67,52 @@ export function useRealtimeSession({
       }
 
       // Set up realtime subscription
-      const channel = supabase
-        .channel(`session-${sessionId}`)
-        .on("presence", { event: "sync" }, () => {
-          const state = channel.presenceState()
-          const currentParticipants = Object.values(state).flat()
-          setParticipants(currentParticipants)
-          onParticipantsUpdate?.(currentParticipants)
-        })
-        .on("presence", { event: "join" }, ({ key, newPresences }) => {
-          setParticipants((prev) => [...prev, ...newPresences])
-        })
-        .on("presence", { event: "leave" }, ({ key, leftPresences }) => {
-          setParticipants((prev) => prev.filter((p) => !leftPresences.some((lp) => lp.user_id === p.user_id)))
-        })
-        .on(
-          "postgres_changes",
-          {
-            event: "INSERT",
-            schema: "public",
-            table: "session_messages",
-            filter: `session_id=eq.${sessionId}`,
-          },
-          (payload) => {
-            const newMessage = payload.new
-            setMessages((prev) => [...prev, newMessage])
-            onMessagesUpdate?.([...messages, newMessage])
-          },
-        )
+      const channel = supabase.channel(`session:${sessionId}`)
 
-      await channel.subscribe(async (status) => {
-        if (status === "SUBSCRIBED") {
-          await channel.track({
-            user_id: user.id,
-            user_name: user.fullName || user.firstName || "Unknown User",
-            online_at: new Date().toISOString(),
-          })
-          setIsConnected(true)
-        }
-      })
+      channel
+        .on("postgres_changes", { event: "*", schema: "public", table: "sessions" }, (payload) => {
+          console.log("Session update:", payload)
+          onSessionUpdate?.(payload.new)
+        })
+        .on("postgres_changes", { event: "*", schema: "public", table: "battles" }, (payload) => {
+          console.log("Battle update:", payload)
+          onSessionUpdate?.(payload.new)
+        })
+        .subscribe((status) => {
+          console.log("Realtime subscription status:", status)
+          if (status === "SUBSCRIBED") {
+            setIsConnected(true)
+          } else if (status === "CHANNEL_ERROR") {
+            setError("Failed to connect to realtime updates")
+            onError?.("Failed to connect to realtime updates")
+          }
+        })
 
       channelRef.current = channel
-    } catch (err: any) {
-      console.error("Error joining session:", err)
-      setError(err.message || "Failed to join session")
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error occurred"
+      setError(errorMessage)
+      onError?.(errorMessage)
+      console.error("Failed to join session:", err)
+    } finally {
+      setIsJoining(false)
     }
   }
 
-  const leaveSession = () => {
+  const leaveSession = useCallback(() => {
     if (channelRef.current) {
       channelRef.current.unsubscribe()
       channelRef.current = null
     }
     setIsConnected(false)
-    setParticipants([])
-    setMessages([])
-  }
-
-  const sendMessage = async (content: string) => {
-    if (!sessionId || !user) {
-      throw new Error("Cannot send message: missing session or user")
-    }
-
-    try {
-      const response = await fetch("/api/sessions/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          sessionId,
-          content,
-          userId: user.id,
-          userName: user.fullName || user.firstName || "Unknown User",
-        }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to send message")
-      }
-    } catch (err: any) {
-      console.error("Error sending message:", err)
-      throw err
-    }
-  }
-
-  useEffect(() => {
-    return () => {
-      leaveSession()
-    }
+    setError(null)
   }, [])
 
   return {
     isConnected,
-    participants,
-    messages,
+    isJoining,
+    error,
     joinSession,
     leaveSession,
-    sendMessage,
-    error,
   }
 }

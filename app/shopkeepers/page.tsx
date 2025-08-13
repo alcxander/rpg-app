@@ -31,6 +31,7 @@ interface PlayerGold {
   player_id: string
   gold_amount: number
   player_name?: string
+  player_clerk_id?: string
 }
 
 export default function ShopkeepersPage() {
@@ -168,9 +169,18 @@ export default function ShopkeepersPage() {
     try {
       const res = await fetch(`/api/players/gold?campaignId=${encodeURIComponent(cid)}`, { credentials: "include" })
       const { data, raw } = await parseJsonSafe(res)
-      console.log("[shopkeepers.page] load players gold: response", { ok: res.ok, status: res.status, len: raw.length })
+      console.log("[shopkeepers.page] load players gold: response", {
+        ok: res.ok,
+        status: res.status,
+        len: raw.length,
+        data: data,
+      })
       if (res.ok) {
-        setPlayersGold(data.rows || [])
+        const goldData = data.rows || []
+        console.log("[shopkeepers.page] setting players gold:", goldData)
+        setPlayersGold(goldData)
+      } else {
+        console.error("[shopkeepers.page] failed to load players gold:", raw)
       }
     } catch (e: any) {
       console.error("[shopkeepers.page] load players gold error", e)
@@ -387,6 +397,7 @@ export default function ShopkeepersPage() {
   // Update player gold
   const updatePlayerGold = async (playerId: string, newAmount: number) => {
     if (!selectedCampaignId) return
+    console.log("[shopkeepers.page] updating player gold", { playerId, newAmount })
     try {
       const res = await fetch("/api/players/gold", {
         method: "POST",
@@ -757,8 +768,8 @@ export default function ShopkeepersPage() {
                   {playersGold.length === 0 ? (
                     <div className="text-center py-8 text-gray-400">
                       <Coins className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                      <p>No player gold records found</p>
-                      <p className="text-sm">Gold records are created when players make purchases</p>
+                      <p>No campaign members found</p>
+                      <p className="text-sm">Invite players to the campaign to manage their gold</p>
                     </div>
                   ) : (
                     <div className="space-y-4">
@@ -768,11 +779,9 @@ export default function ShopkeepersPage() {
                           className="flex items-center justify-between p-4 bg-gray-700 rounded-lg"
                         >
                           <div>
-                            <p className="font-medium">
-                              {playerGold.player_name || playerGold.player_id.substring(0, 12) + "..."}
-                            </p>
+                            <p className="font-medium">{playerGold.player_name || "Unknown Player"}</p>
                             <p className="text-sm text-gray-400">
-                              Player ID: {playerGold.player_id.substring(0, 12)}...
+                              {playerGold.player_clerk_id || playerGold.player_id.substring(0, 12) + "..."}
                             </p>
                           </div>
                           <div className="flex items-center gap-2">

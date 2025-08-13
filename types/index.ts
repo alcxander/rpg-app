@@ -1,19 +1,103 @@
-export interface CampaignOption {
-  id: string
-  name: string
-  owner_id?: string
-  access_enabled?: boolean
-  created_at?: string
-}
-
 export interface Campaign {
   id: string
   name: string
-  owner_id: string
-  is_owner: boolean
-  is_member: boolean
-  member_role: string | null
-  access_enabled?: boolean
+  description?: string
+  created_at: string
+  updated_at: string
+  dm_user_id: string
+  members?: CampaignMember[]
+}
+
+export interface CampaignMember {
+  id: string
+  campaign_id: string
+  user_id: string
+  role: "dm" | "player"
+  joined_at: string
+  user?: {
+    id: string
+    email: string
+    name?: string
+  }
+}
+
+export interface RealtimeSession {
+  id: string
+  campaign_id: string
+  name: string
+  status: "active" | "paused" | "ended"
+  created_at: string
+  updated_at: string
+  current_battle_id?: string
+  participants?: SessionParticipant[]
+}
+
+export interface SessionParticipant {
+  id: string
+  session_id: string
+  user_id: string
+  character_name?: string
+  joined_at: string
+}
+
+export interface Battle {
+  id: string
+  session_id: string
+  name: string
+  description?: string
+  status: "active" | "completed"
+  created_at: string
+  updated_at: string
+  background_image?: string
+  entities?: BattleEntity[]
+  initiative_order?: InitiativeEntry[]
+  current_turn?: number
+}
+
+export interface BattleEntity {
+  id: string
+  battle_id: string
+  name: string
+  type: "player" | "enemy" | "npc"
+  hp: number
+  max_hp: number
+  ac: number
+  position_x: number
+  position_y: number
+  token_image?: string
+  stats?: EntityStats
+}
+
+export interface EntityStats {
+  strength: number
+  dexterity: number
+  constitution: number
+  intelligence: number
+  wisdom: number
+  charisma: number
+}
+
+export interface InitiativeEntry {
+  entity_id: string
+  initiative: number
+  entity?: BattleEntity
+}
+
+export interface ChatMessage {
+  id: string
+  session_id: string
+  user_id: string
+  user_name: string
+  message: string
+  message_type: "chat" | "system" | "roll"
+  created_at: string
+}
+
+export interface Message {
+  id: string
+  user_name: string
+  message: string
+  message_type: "chat" | "system" | "roll"
   created_at: string
 }
 
@@ -21,115 +105,69 @@ export interface Shopkeeper {
   id: string
   campaign_id: string
   name: string
-  race: string
-  age: number
-  alignment: string
-  quote: string
-  description: string
-  shop_type: string
-  image_url: string | null
-  removed?: boolean
-  removed_at?: string | null
+  description?: string
+  location?: string
+  personality?: string
   created_at: string
-  inventory: ShopkeeperInventoryItem[]
+  updated_at: string
+  inventory?: ShopItem[]
 }
 
-export interface ShopkeeperInventoryItem {
+export interface ShopItem {
   id: string
   shopkeeper_id: string
-  item_name: string
-  rarity: string
-  base_price: number
-  price_adjustment_percent: number
-  final_price: number
-  stock_quantity: number
+  name: string
+  description?: string
+  price: number
+  quantity: number
+  category: string
+  rarity: "common" | "uncommon" | "rare" | "very_rare" | "legendary"
   created_at: string
+  updated_at: string
 }
 
-export interface SessionOption {
+export interface PlayerGold {
   id: string
   campaign_id: string
-  name: string
-  created_at: string
+  user_id: string
+  amount: number
+  updated_at: string
 }
 
-export interface MapToken {
+export interface LootTable {
   id: string
   name: string
-  x: number
-  y: number
-  imageUrl: string
-  isPlayer: boolean
-  hp: number
-  maxHp: number
-  ac: number
-  initiativeOrder: number
-}
-
-export interface Battle {
-  id: string
-  session_id: string
-  name: string
-  entities: BattleEntity[]
-  map_url?: string
-  created_at: string
-}
-
-export interface BattleEntity {
-  id: string
-  name: string
-  type: "monster" | "ally"
-  hp: number
-  max_hp: number
-  ac: number
-  initiative_order: number
-  token_image?: string
-  stats?: Record<string, any>
-}
-
-export interface LootResult {
-  id: string
-  session_id: string
+  description?: string
   items: LootItem[]
-  generated_at: string
 }
 
 export interface LootItem {
   name: string
-  description: string
-  rarity: string
-  value: number
-  quantity: number
+  description?: string
+  rarity: "common" | "uncommon" | "rare" | "very_rare" | "legendary"
+  weight: number
+  value?: number
 }
 
-export interface User {
-  id: string
-  clerk_id: string
-  name: string
-  email?: string
-  created_at: string
-}
-
-export interface PlayerGold {
-  player_id: string
-  campaign_id: string
-  gold_amount: number
-  player_name?: string
-  player_clerk_id?: string
-  role?: string
-  joined_at?: string
-}
-
-export interface Message {
-  id: string
-  user_id: string
-  user_name: string
-  content: string
-  created_at: string
+export interface GeneratedLoot {
+  items: LootItem[]
+  total_value: number
+  generated_at: string
 }
 
 export interface SessionState {
-  id: string
-  map?: string | null
-  tokens?: MapToken[]
+  battle?: Battle
+  entities: BattleEntity[]
+  messages: ChatMessage[]
+  initiative_order: InitiativeEntry[]
+  current_turn: number
+}
+
+export interface UseRealtimeSessionReturn {
+  session: RealtimeSession | null
+  loading: boolean
+  error: string | null
+  refetch: () => void
+  sessionState: SessionState
+  updateSessionState: (updates: Partial<SessionState>) => void
 }

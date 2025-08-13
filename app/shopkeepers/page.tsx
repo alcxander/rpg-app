@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import type { CampaignOption, Shopkeeper } from "@/types"
+import type { Campaign, Shopkeeper } from "@/types"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useUser, RedirectToSignIn } from "@clerk/nextjs"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -13,6 +13,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
 import { ToastAction } from "@/components/ui/toast"
+import { createClient } from "@/lib/supabaseClient"
 import {
   Plus,
   RefreshCw,
@@ -26,32 +27,24 @@ import {
   Minus,
   Coins,
 } from "lucide-react"
-
-interface PlayerGold {
-  player_id: string
-  gold_amount: number
-  player_name?: string
-  player_clerk_id?: string
-  role?: string
-  joined_at?: string
-}
+import { useAuth } from "@/hooks/useAuth" // Import useAuth hook
 
 export default function ShopkeepersPage() {
   const router = useRouter()
   const search = useSearchParams()
   const { isLoaded, isSignedIn, user } = useUser()
   const { toast } = useToast()
+  const { userId } = useAuth() // Use useAuth hook
+  const supabase = createClient()
 
-  const [campaigns, setCampaigns] = useState<CampaignOption[]>([])
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
-
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [selectedCampaign, setSelectedCampaign] = useState<string>("")
   const [shopkeepers, setShopkeepers] = useState<Shopkeeper[]>([])
+  const [playerGold, setPlayerGold] = useState<number>(0)
+  const [loading, setLoading] = useState(true)
   const [campaignAccessEnabled, setCampaignAccessEnabled] = useState<boolean>(true)
   const [isOwner, setIsOwner] = useState<boolean>(false)
-  const [playersGold, setPlayersGold] = useState<PlayerGold[]>([])
-  const [userGold, setUserGold] = useState<number>(0)
-
-  const [loading, setLoading] = useState(false)
+  const [playersGold, setPlayersGold] = useState<any[]>([])
   const [generating, setGenerating] = useState(false)
   const [seeding, setSeeding] = useState(false)
   const [count, setCount] = useState(1)
@@ -108,57 +101,44 @@ export default function ShopkeepersPage() {
 
   // Load campaigns
   useEffect(() => {
-    if (!isLoaded || !isSignedIn) return
+    if (!isLoaded || !isSignedIn || !userId) return
     ;(async () => {
       console.log("[shopkeepers.page] load campaigns: start")
       try {
-        const res = await fetch("/api/campaigns", { credentials: "include" })
-        const { data, raw } = await parseJsonSafe(res)
-        console.log("[shopkeepers.page] load campaigns: response", { ok: res.ok, status: res.status, len: raw.length })
-        if (!res.ok) throw new Error(raw || "Failed to load campaigns")
-        const list: CampaignOption[] = data.campaigns || []
+        const { data, error } = await supabase
+          .from("campaigns")
+          .select("*")
+          .or(`dm_user_id.eq.${userId},members.user_id.eq.${userId}`)
+
+        if (error) throw error
+        const list: any[] = data || []
         setCampaigns(list)
-        if (!selectedCampaignId && list?.[0]?.id) {
-          setSelectedCampaignId(list[0].id)
+        if (!selectedCampaign && list?.[0]?.id) {
+          setSelectedCampaign(list[0].id)
           console.log("[shopkeepers.page] default campaign set", { id: list[0].id })
         }
       } catch (e: any) {
         showError("Failed to load campaigns", String(e?.message || e))
       }
     })()
-  }, [isLoaded, isSignedIn, selectedCampaignId])
+  }, [isLoaded, isSignedIn, userId, selectedCampaign])
 
   // Load shopkeepers for a campaign
-  const loadShopkeepers = async (cid: string) => {
-    setLoading(true)
-    console.log("[shopkeepers.page] load shopkeepers: start", { campaignId: cid })
+  const fetchShopkeepers = async () => {
     try {
-      const res = await fetch(`/api/shopkeepers?campaignId=${encodeURIComponent(cid)}`, { credentials: "include" })
-      const { data, raw } = await parseJsonSafe(res)
-      console.log("[shopkeepers.page] load shopkeepers: response", { ok: res.ok, status: res.status, len: raw.length })
-      if (!res.ok) throw new Error(raw || "Failed to load shopkeepers")
+      setLoading(true)
+      const { data, error } = await supabase
+        .from("shopkeepers")
+        .select(`
+          *,
+          inventory:shop_items(*)
+        `)
+        .eq("campaign_id", selectedCampaign)
 
-      setShopkeepers(data.shopkeepers || [])
-      setCampaignAccessEnabled(Boolean(data.campaign?.access_enabled))
-
-      // Debug the isOwner value
-      const ownerStatus = Boolean(data.campaign?.isOwner)
-      console.log("[shopkeepers.page] ownership check", {
-        campaignData: data.campaign,
-        isOwner: ownerStatus,
-        userId: user?.id,
-        rawIsOwner: data.campaign?.isOwner,
-      })
-
-      setIsOwner(ownerStatus)
-
-      console.log("[shopkeepers.page] load shopkeepers: set", {
-        items: (data.shopkeepers || []).length,
-        access: Boolean(data.campaign?.access_enabled),
-        isOwner: ownerStatus,
-      })
-    } catch (e: any) {
-      showError("Error loading shopkeepers", String(e?.message || e))
+      if (error) throw error
+      setShopkeepers(data || [])
+    } catch (error) {
+      console.error("Error fetching shopkeepers:", error)
     } finally {
       setLoading(false)
     }
@@ -172,20 +152,17 @@ export default function ShopkeepersPage() {
     }
     console.log("[shopkeepers.page] load players gold: start", { campaignId: cid })
     try {
-      const res = await fetch(`/api/players/gold?campaignId=${encodeURIComponent(cid)}`, { credentials: "include" })
-      const { data, raw } = await parseJsonSafe(res)
-      console.log("[shopkeepers.page] load players gold: response", {
-        ok: res.ok,
-        status: res.status,
-        len: raw.length,
-        data: data,
-      })
-      if (res.ok) {
-        const goldData = data.rows || []
-        console.log("[shopkeepers.page] setting players gold:", goldData)
-        setPlayersGold(goldData)
+      const { data, error } = await supabase
+        .from("players_gold")
+        .select("amount")
+        .eq("campaign_id", cid)
+        .then(({ data }) => data)
+
+      if (error) {
+        console.error("[shopkeepers.page] failed to load players gold:", error)
       } else {
-        console.error("[shopkeepers.page] failed to load players gold:", raw)
+        console.log("[shopkeepers.page] setting players gold:", data)
+        setPlayersGold(data || [])
       }
     } catch (e: any) {
       console.error("[shopkeepers.page] load players gold error", e)
@@ -193,75 +170,45 @@ export default function ShopkeepersPage() {
   }
 
   // Load user's own gold for players
-  const loadUserGold = async (cid: string) => {
-    if (isOwner) {
-      console.log("[shopkeepers.page] Skipping user gold load - is owner")
-      return
-    }
-    if (!user?.id) {
-      console.log("[shopkeepers.page] Skipping user gold load - no user ID")
-      return
-    }
-
-    console.log("[shopkeepers.page] load user gold: start", { campaignId: cid, userId: user.id })
+  const fetchPlayerGold = async () => {
     try {
-      const url = `/api/players/gold?campaignId=${encodeURIComponent(cid)}&playerId=${encodeURIComponent(user.id)}`
-      console.log("[shopkeepers.page] fetching user gold from:", url)
+      const { data, error } = await supabase
+        .from("players_gold")
+        .select("amount")
+        .eq("campaign_id", selectedCampaign)
+        .eq("user_id", userId)
+        .single()
 
-      const res = await fetch(url, { credentials: "include" })
-      const { data, raw } = await parseJsonSafe(res)
-
-      console.log("[shopkeepers.page] load user gold: response", {
-        ok: res.ok,
-        status: res.status,
-        len: raw.length,
-        data: data,
-        goldAmount: data?.rows?.[0]?.gold_amount,
-      })
-
-      if (res.ok && data?.rows?.[0]) {
-        const goldAmount = Number(data.rows[0].gold_amount) || 0
-        console.log("[shopkeepers.page] Setting user gold to:", goldAmount)
-        setUserGold(goldAmount)
-      } else {
-        console.log("[shopkeepers.page] No gold data found or error, setting to 0")
-        setUserGold(0)
-      }
-    } catch (e: any) {
-      console.error("[shopkeepers.page] load user gold error", e)
-      setUserGold(0)
+      if (error && error.code !== "PGRST116") throw error
+      setPlayerGold(data?.amount || 0)
+    } catch (error) {
+      console.error("Error fetching player gold:", error)
     }
   }
 
   useEffect(() => {
-    if (selectedCampaignId) {
-      console.log("[shopkeepers.page] Campaign changed, loading shopkeepers:", selectedCampaignId)
-      loadShopkeepers(selectedCampaignId)
-    }
-  }, [selectedCampaignId])
-
-  useEffect(() => {
-    if (selectedCampaignId) {
-      console.log("[shopkeepers.page] Loading gold data for campaign:", selectedCampaignId, "isOwner:", isOwner)
+    if (selectedCampaign) {
+      console.log("[shopkeepers.page] Campaign changed, loading shopkeepers:", selectedCampaign)
+      fetchShopkeepers()
       if (isOwner) {
-        loadPlayersGold(selectedCampaignId)
+        loadPlayersGold(selectedCampaign)
       } else {
-        loadUserGold(selectedCampaignId)
+        fetchPlayerGold()
       }
     }
-  }, [selectedCampaignId, isOwner])
+  }, [selectedCampaign, isOwner])
 
   // Generate (now allows 1–20 and tops up only the delta)
   const onGenerate = async () => {
-    if (!selectedCampaignId) return
-    console.log("[shopkeepers.page] generate: start", { campaignId: selectedCampaignId, count })
+    if (!selectedCampaign) return
+    console.log("[shopkeepers.page] generate: start", { campaignId: selectedCampaign, count })
     setGenerating(true)
     try {
       const res = await fetch("/api/shopkeepers/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ campaignId: selectedCampaignId, count }),
+        body: JSON.stringify({ campaignId: selectedCampaign, count }),
       })
       const clone = res.clone()
       let data: any = null
@@ -284,7 +231,7 @@ export default function ShopkeepersPage() {
         className: createdCount > 0 ? "bg-green-600 text-white" : "bg-gray-700 text-white",
       })
 
-      await loadShopkeepers(selectedCampaignId)
+      await fetchShopkeepers()
     } catch (e: any) {
       const msg = String(e?.message || e)
       console.error("[shopkeepers.page] generate error", { msg })
@@ -297,21 +244,21 @@ export default function ShopkeepersPage() {
 
   // Quick seed 5 when you have zero
   const onQuickSeed = async () => {
-    if (!selectedCampaignId) return
+    if (!selectedCampaign) return
     setSeeding(true)
-    console.log("[shopkeepers.page] quick-seed: start", { campaignId: selectedCampaignId })
+    console.log("[shopkeepers.page] quick-seed: start", { campaignId: selectedCampaign })
     try {
       const res = await fetch("/api/shopkeepers/quick-seed", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ campaignId: selectedCampaignId }),
+        body: JSON.stringify({ campaignId: selectedCampaign }),
       })
       const { data, raw } = await parseJsonSafe(res)
       console.log("[shopkeepers.page] quick-seed: response", { ok: res.ok, status: res.status, len: raw.length })
       if (!res.ok) throw new Error(raw || "Seed failed")
       toast({ title: "Added 5 shopkeepers", className: "bg-green-600 text-white" })
-      await loadShopkeepers(selectedCampaignId)
+      await fetchShopkeepers()
     } catch (e: any) {
       showError("Seed error", String(e?.message || e))
     } finally {
@@ -321,13 +268,13 @@ export default function ShopkeepersPage() {
 
   // Toggle access
   const toggleAccess = async () => {
-    if (!selectedCampaignId) return
+    if (!selectedCampaign) return
     console.log("[shopkeepers.page] toggle access: start", {
-      campaignId: selectedCampaignId,
+      campaignId: selectedCampaign,
       next: !campaignAccessEnabled,
     })
     try {
-      const res = await fetch(`/api/campaigns/${selectedCampaignId}/shop-access`, {
+      const res = await fetch(`/api/campaigns/${selectedCampaign}/shop-access`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -348,7 +295,7 @@ export default function ShopkeepersPage() {
 
   // Remove a shopkeeper (soft delete)
   const onRemove = async (shopkeeperId: string) => {
-    if (!selectedCampaignId) return
+    if (!selectedCampaign) return
     if (!confirm("Remove this shopkeeper from the campaign?")) return
     try {
       const res = await fetch(`/api/shopkeepers/${encodeURIComponent(shopkeeperId)}`, {
@@ -359,7 +306,7 @@ export default function ShopkeepersPage() {
       console.log("[shopkeepers.page] remove: response", { ok: res.ok, status: res.status, len: raw.length })
       if (!res.ok) throw new Error(raw || "Failed to remove")
       toast({ title: "Shopkeeper removed", className: "bg-green-600 text-white" })
-      await loadShopkeepers(selectedCampaignId)
+      await fetchShopkeepers()
     } catch (e: any) {
       showError("Remove error", String(e?.message || e))
     }
@@ -373,15 +320,15 @@ export default function ShopkeepersPage() {
   }, [search])
 
   useEffect(() => {
-    if (!selectedCampaignId) return
+    if (!selectedCampaign) return
     if (!shouldAutoGenerate) return
     if (autoGenTriggered.current) return
     const c = Number(search.get("count") || "")
     if (Number.isFinite(c) && c >= 1 && c <= 20) setCount(c)
     autoGenTriggered.current = true
-    console.log("[shopkeepers.page] auto-generate: trigger", { campaignId: selectedCampaignId, count: c || count })
+    console.log("[shopkeepers.page] auto-generate: trigger", { campaignId: selectedCampaign, count: c || count })
     onGenerate()
-  }, [selectedCampaignId, shouldAutoGenerate, count])
+  }, [selectedCampaign, shouldAutoGenerate, count])
 
   // Update inventory without full page reload
   const updateInventory = async (inventoryId: string, action: "increment" | "decrement") => {
@@ -426,7 +373,7 @@ export default function ShopkeepersPage() {
 
   // Update player gold
   const updatePlayerGold = async (playerId: string, newAmount: number) => {
-    if (!selectedCampaignId) return
+    if (!selectedCampaign) return
     console.log("[shopkeepers.page] updating player gold", { playerId, newAmount })
     try {
       const res = await fetch("/api/players/gold", {
@@ -435,7 +382,7 @@ export default function ShopkeepersPage() {
         credentials: "include",
         body: JSON.stringify({
           playerId,
-          campaignId: selectedCampaignId,
+          campaignId: selectedCampaign,
           goldAmount: newAmount,
         }),
       })
@@ -450,7 +397,7 @@ export default function ShopkeepersPage() {
         className: "bg-green-600 text-white",
       })
 
-      await loadPlayersGold(selectedCampaignId)
+      await loadPlayersGold(selectedCampaign)
     } catch (e: any) {
       showError("Error updating gold", String(e?.message || e))
     }
@@ -458,8 +405,8 @@ export default function ShopkeepersPage() {
 
   // Purchase item for player
   const purchaseItem = async (shopkeeperId: string, itemId: string, itemPrice: number) => {
-    if (!selectedCampaignId || !user?.id) {
-      console.log("[shopkeepers.page] Purchase blocked - missing data", { selectedCampaignId, userId: user?.id })
+    if (!selectedCampaign || !user?.id) {
+      console.log("[shopkeepers.page] Purchase blocked - missing data", { selectedCampaign, userId: user?.id })
       return
     }
 
@@ -467,15 +414,15 @@ export default function ShopkeepersPage() {
       shopkeeperId,
       itemId,
       itemPrice,
-      userGold,
-      hasEnoughGold: userGold >= itemPrice,
+      playerGold,
+      hasEnoughGold: playerGold >= itemPrice,
     })
 
-    if (userGold < itemPrice) {
-      console.log("[shopkeepers.page] Purchase blocked - insufficient gold", { userGold, itemPrice })
+    if (playerGold < itemPrice) {
+      console.log("[shopkeepers.page] Purchase blocked - insufficient gold", { playerGold, itemPrice })
       toast({
         title: "Insufficient gold",
-        description: `You need ${itemPrice} gold but only have ${userGold}`,
+        description: `You need ${itemPrice} gold but only have ${playerGold}`,
         variant: "destructive",
       })
       return
@@ -490,7 +437,7 @@ export default function ShopkeepersPage() {
         body: JSON.stringify({
           shopkeeperId,
           itemId,
-          campaignId: selectedCampaignId,
+          campaignId: selectedCampaign,
         }),
       })
 
@@ -507,8 +454,8 @@ export default function ShopkeepersPage() {
       })
 
       // Reload data to reflect changes
-      await loadShopkeepers(selectedCampaignId)
-      await loadUserGold(selectedCampaignId)
+      await fetchShopkeepers()
+      await fetchPlayerGold()
     } catch (e: any) {
       console.error("[shopkeepers.page] Purchase error", e)
       showError("Purchase failed", String(e?.message || e))
@@ -539,8 +486,8 @@ export default function ShopkeepersPage() {
             {/* Buy button debug info for players */}
             {!isOwner && (
               <div className="text-xs text-gray-500 bg-gray-800 px-2 py-1 rounded">
-                Gold: {userGold} | Access: {String(campaignAccessEnabled)} | Campaign:{" "}
-                {selectedCampaignId?.substring(0, 8)}...
+                Gold: {playerGold} | Access: {String(campaignAccessEnabled)} | Campaign:{" "}
+                {selectedCampaign?.substring(0, 8)}...
               </div>
             )}
           </div>
@@ -548,7 +495,7 @@ export default function ShopkeepersPage() {
             {!isOwner && (
               <div className="flex items-center gap-2 bg-yellow-600/20 px-3 py-2 rounded-lg border border-yellow-600/40">
                 <Coins className="w-4 h-4 text-yellow-400" />
-                <span className="text-yellow-200 font-medium">{userGold} Gold</span>
+                <span className="text-yellow-200 font-medium">{playerGold} Gold</span>
               </div>
             )}
 
@@ -561,7 +508,7 @@ export default function ShopkeepersPage() {
               <Home className="w-4 h-4 mr-2" /> Home
             </Button>
 
-            <Select value={selectedCampaignId || ""} onValueChange={(value: string) => setSelectedCampaignId(value)}>
+            <Select value={selectedCampaign || ""} onValueChange={(value: string) => setSelectedCampaign(value)}>
               <SelectTrigger className="bg-gray-800 border-gray-700 text-white w-64">
                 <SelectValue placeholder="Select campaign" />
               </SelectTrigger>
@@ -582,7 +529,7 @@ export default function ShopkeepersPage() {
             />
 
             <Button
-              onClick={() => selectedCampaignId && loadShopkeepers(selectedCampaignId)}
+              onClick={() => selectedCampaign && fetchShopkeepers()}
               variant="secondary"
               className="bg-gray-800 border border-gray-700 text-white"
             >
@@ -624,7 +571,7 @@ export default function ShopkeepersPage() {
                 {isOwner && (
                   <Button
                     onClick={onQuickSeed}
-                    disabled={seeding || !selectedCampaignId}
+                    disabled={seeding || !selectedCampaign}
                     className="bg-emerald-600 hover:bg-emerald-700 text-white"
                     title="Quickly add 5 random shopkeepers to get started"
                   >
@@ -690,7 +637,7 @@ export default function ShopkeepersPage() {
                         </div>
                         <div className="space-y-2">
                           {sk.inventory.map((it) => {
-                            const canAfford = userGold >= it.final_price
+                            const canAfford = playerGold >= it.final_price
                             const inStock = it.stock_quantity > 0
                             const accessEnabled = campaignAccessEnabled
                             const isDisabled = !inStock || !accessEnabled || (!isOwner && !canAfford)
@@ -732,7 +679,7 @@ export default function ShopkeepersPage() {
                                       className="bg-purple-600 hover:bg-purple-700 text-white h-6 px-2"
                                       onClick={() => purchaseItem(sk.id, it.id, it.final_price)}
                                       disabled={isDisabled}
-                                      title={`Buy 1 (${it.final_price}gp) - You have ${userGold}gp - ${
+                                      title={`Buy 1 (${it.final_price}gp) - You have ${playerGold}gp - ${
                                         !inStock
                                           ? "Out of stock"
                                           : !accessEnabled
@@ -783,7 +730,7 @@ export default function ShopkeepersPage() {
                     <Button
                       onClick={onGenerate}
                       className="bg-purple-600 hover:bg-purple-700 text-white"
-                      disabled={generating || !selectedCampaignId}
+                      disabled={generating || !selectedCampaign}
                     >
                       {generating ? (
                         <Loader2 className="w-4 h-4 animate-spin mr-2" />
@@ -803,7 +750,7 @@ export default function ShopkeepersPage() {
                     {shopkeepers.length === 0 && (
                       <Button
                         onClick={onQuickSeed}
-                        disabled={seeding || !selectedCampaignId}
+                        disabled={seeding || !selectedCampaign}
                         className="bg-emerald-600 hover:bg-emerald-700 text-white"
                         title="Quickly add 5 random shopkeepers to get started"
                       >

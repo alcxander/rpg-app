@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { auth } from "@clerk/nextjs/server"
-import { createServerSupabaseClient } from "@/lib/supabaseAdmin"
+import { createServerSupabaseClient, createAdminClient } from "@/lib/supabaseAdmin"
 
 // GET /api/players/gold?campaignId=...
 // DM-only read of all player gold for the campaign
@@ -17,6 +17,9 @@ export async function GET(req: NextRequest) {
   if (!campaignId) return NextResponse.json({ error: "campaignId required" }, { status: 400 })
 
   const supabase = createServerSupabaseClient(token)
+  const adminSupabase = createAdminClient()
+
+  console.log("[api/players/gold] GET start:", { campaignId, playerId, userId: userId.substring(0, 12) + "..." })
 
   // If playerId is provided, return just that player's gold (for non-DMs)
   if (playerId) {
@@ -26,30 +29,39 @@ export async function GET(req: NextRequest) {
       .eq("campaign_id", campaignId)
       .eq("player_id", playerId)
 
-    if (error) return NextResponse.json({ error: "Failed to load gold" }, { status: 500 })
+    if (error) {
+      console.error("[api/players/gold] Failed to load player gold:", error)
+      return NextResponse.json({ error: "Failed to load gold" }, { status: 500 })
+    }
     return NextResponse.json({ rows: data || [] })
   }
 
-  // For DMs, verify ownership and return all campaign members with their gold
+  // For DMs, verify ownership first
   const { data: camp, error: cErr } = await supabase
     .from("campaigns")
     .select("id, owner_id")
     .eq("id", campaignId)
     .single()
 
-  if (cErr || !camp) return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
-  if (camp.owner_id !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  if (cErr || !camp) {
+    console.error("[api/players/gold] Campaign not found:", cErr)
+    return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
+  }
 
-  // Get all campaign members with their user info
-  const { data: members, error: membersError } = await supabase
+  if (camp.owner_id !== userId) {
+    console.error("[api/players/gold] Access denied - not owner:", { userId, ownerId: camp.owner_id })
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+
+  console.log("[api/players/gold] DM access verified for campaign:", campaignId)
+
+  // Use admin client to get all campaign members (bypasses RLS)
+  const { data: members, error: membersError } = await adminSupabase
     .from("campaign_members")
     .select(`
       user_id,
-      users!inner(
-        id,
-        name,
-        clerk_id
-      )
+      role,
+      joined_at
     `)
     .eq("campaign_id", campaignId)
 
@@ -58,9 +70,29 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Failed to load campaign members" }, { status: 500 })
   }
 
+  console.log("[api/players/gold] Found members:", members?.length || 0)
+
+  if (!members || members.length === 0) {
+    console.log("[api/players/gold] No members found for campaign")
+    return NextResponse.json({ rows: [] })
+  }
+
+  // Get user info from users table using admin client
+  const memberIds = members.map((m) => m.user_id)
+  const { data: users, error: usersError } = await adminSupabase
+    .from("users")
+    .select("id, name, clerk_id")
+    .in("clerk_id", memberIds)
+
+  if (usersError) {
+    console.error("[api/players/gold] Failed to fetch user info:", usersError)
+    return NextResponse.json({ error: "Failed to load user information" }, { status: 500 })
+  }
+
+  console.log("[api/players/gold] Found users:", users?.length || 0)
+
   // Get existing gold records for all members
-  const memberIds = members?.map((m) => m.user_id) || []
-  const { data: goldRecords, error: goldError } = await supabase
+  const { data: goldRecords, error: goldError } = await adminSupabase
     .from("players_gold")
     .select("player_id, gold_amount")
     .eq("campaign_id", campaignId)
@@ -71,24 +103,37 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Failed to load gold records" }, { status: 500 })
   }
 
+  console.log("[api/players/gold] Found gold records:", goldRecords?.length || 0)
+
   // Create a map of existing gold amounts
   const goldMap = new Map()
   goldRecords?.forEach((record) => {
     goldMap.set(record.player_id, record.gold_amount)
   })
 
+  // Create a map of user info by clerk_id
+  const userMap = new Map()
+  users?.forEach((user) => {
+    userMap.set(user.clerk_id, user)
+  })
+
   // Combine member info with gold amounts (default to 0 if no record)
-  const result =
-    members?.map((member) => ({
+  const result = members.map((member) => {
+    const userInfo = userMap.get(member.user_id)
+    return {
       player_id: member.user_id,
       gold_amount: goldMap.get(member.user_id) || 0,
-      player_name: member.users.name,
-      player_clerk_id: member.users.clerk_id,
-    })) || []
+      player_name: userInfo?.name || "Unknown User",
+      player_clerk_id: member.user_id,
+      role: member.role,
+      joined_at: member.joined_at,
+    }
+  })
 
   console.log("[api/players/gold] DM gold query result:", {
     campaignId,
-    membersCount: members?.length || 0,
+    membersCount: members.length,
+    usersCount: users?.length || 0,
     goldRecordsCount: goldRecords?.length || 0,
     resultCount: result.length,
   })
@@ -111,14 +156,28 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = createServerSupabaseClient(token)
+  const adminSupabase = createAdminClient()
+
+  console.log("[api/players/gold] POST start:", {
+    playerId: playerId.substring(0, 12) + "...",
+    campaignId,
+    goldAmount,
+    userId: userId.substring(0, 12) + "...",
+  })
 
   // Verify DM ownership
   const { data: camp, error: cErr } = await supabase.from("campaigns").select("owner_id").eq("id", campaignId).single()
-  if (cErr || !camp) return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
-  if (camp.owner_id !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  if (cErr || !camp) {
+    console.error("[api/players/gold] Campaign not found:", cErr)
+    return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
+  }
+  if (camp.owner_id !== userId) {
+    console.error("[api/players/gold] Access denied - not owner")
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
 
-  // Verify the player is a member of the campaign
-  const { data: membership, error: memberErr } = await supabase
+  // Verify the player is a member of the campaign using admin client
+  const { data: membership, error: memberErr } = await adminSupabase
     .from("campaign_members")
     .select("id")
     .eq("campaign_id", campaignId)
@@ -126,13 +185,14 @@ export async function POST(req: NextRequest) {
     .single()
 
   if (memberErr || !membership) {
+    console.error("[api/players/gold] Player not a member:", memberErr)
     return NextResponse.json({ error: "Player is not a member of this campaign" }, { status: 400 })
   }
 
-  // Upsert player's gold
+  // Upsert player's gold using admin client
   const safeGold = Math.max(0, Math.round(Number(goldAmount) * 100) / 100)
 
-  const { data: existing } = await supabase
+  const { data: existing } = await adminSupabase
     .from("players_gold")
     .select("id")
     .eq("player_id", playerId)
@@ -140,7 +200,6 @@ export async function POST(req: NextRequest) {
     .maybeSingle()
 
   const row = {
-    id: existing?.id,
     player_id: playerId,
     campaign_id: campaignId,
     gold_amount: safeGold,
@@ -148,8 +207,8 @@ export async function POST(req: NextRequest) {
   }
 
   const { error: upErr } = existing?.id
-    ? await supabase.from("players_gold").update(row).eq("id", existing.id)
-    : await supabase.from("players_gold").insert(row)
+    ? await adminSupabase.from("players_gold").update(row).eq("id", existing.id)
+    : await adminSupabase.from("players_gold").insert(row)
 
   if (upErr) {
     console.error("[api/players/gold] Failed to update gold:", upErr)

@@ -1,621 +1,465 @@
 "use client"
 
-import type React from "react"
-import type { CampaignOption, Shopkeeper } from "@/types" // Declare the Shopkeeper variable here
-import { useEffect, useMemo, useRef, useState } from "react"
-import { useUser, RedirectToSignIn } from "@clerk/nextjs"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useState, useEffect } from "react"
+import { useSearchParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Badge } from "@/components/ui/badge"
+import { Loader2, Store, Users, ArrowLeft, Sparkles, Coins } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { ToastAction } from "@/components/ui/toast"
-import {
-  Plus,
-  RefreshCw,
-  ToggleRight,
-  ShoppingCart,
-  Loader2,
-  Home,
-  AlertTriangle,
-  Trash2,
-  Sparkles,
-} from "lucide-react"
+import { useUser } from "@clerk/nextjs"
+
+interface Campaign {
+  id: string
+  name: string
+  is_owner?: boolean
+  is_member?: boolean
+  member_role?: string
+}
+
+interface Shopkeeper {
+  id: string
+  name: string
+  race: string
+  age: number
+  alignment: string
+  quote: string
+  description: string
+  shop_type: string
+  image_url: string | null
+  created_at: string
+  inventory: ShopItem[]
+}
+
+interface ShopItem {
+  id: string
+  item_name: string
+  rarity: string
+  base_price: number
+  price_adjustment_percent: number
+  final_price: number
+  stock_quantity: number
+}
+
+interface PlayerGold {
+  player_id: string
+  gold_amount: number
+}
 
 export default function ShopkeepersPage() {
+  const { user } = useUser()
+  const searchParams = useSearchParams()
   const router = useRouter()
-  const search = useSearchParams()
-  const { isLoaded, isSignedIn } = useUser()
   const { toast } = useToast()
 
-  const [campaigns, setCampaigns] = useState<CampaignOption[]>([])
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
-
-  const [shopkeepers, setShopkeepers] = useState<Shopkeeper[]>([]) // Corrected the useState syntax here
-  const [campaignAccessEnabled, setCampaignAccessEnabled] = useState<boolean>(true)
-  const [isOwner, setIsOwner] = useState<boolean>(false)
-
-  const [loading, setLoading] = useState(false)
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>("")
+  const [shopkeepers, setShopkeepers] = useState<Shopkeeper[]>([])
+  const [playersGold, setPlayersGold] = useState<PlayerGold[]>([])
+  const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
-  const [seeding, setSeeding] = useState(false)
-  const [count, setCount] = useState(1)
-  const [sessionId, setSessionId] = useState<string>("")
 
-  const parseJsonSafe = async (res: Response) => {
-    const clone = res.clone()
-    try {
-      const data = await clone.json()
-      return { data, raw: JSON.stringify(data) }
-    } catch {
-      const text = await res.text().catch(() => "")
-      return { data: null as any, raw: text }
-    }
-  }
+  // Get campaignId from URL params
+  const urlCampaignId = searchParams.get("campaignId")
+  const autoGenerate = searchParams.get("autoGenerate") === "1"
 
-  const showError = (title: string, errorRaw: string) => {
-    const raw = String(errorRaw || "").slice(0, 4000)
-    console.error("[shopkeepers.page] error", { title, raw })
-    toast({
-      title,
-      description: raw,
-      variant: "destructive",
-      className: "bg-red-600 text-white",
-      action: (
-        <ToastAction
-          altText="Copy error"
-          onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(errorRaw)
-            } catch {}
-          }}
-        >
-          Copy
-        </ToastAction>
-      ),
-    })
-  }
-
-  // Deterministic tiny color blob per shopkeeper
-  function hueFromId(id: string) {
-    let h = 0
-    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360
-    return h
-  }
-  function blobStyleFor(id: string) {
-    const h = hueFromId(id)
-    const c1 = `hsla(${h}, 85%, 65%, 0.15)`
-    const c2 = `hsla(${h}, 85%, 65%, 0.08)`
-    return {
-      background: `radial-gradient(circle at 80% 20%, ${c1} 0%, ${c2} 55%, transparent 70%)`,
-    } as React.CSSProperties
-  }
-
-  // Load campaigns
+  // Load campaigns on mount
   useEffect(() => {
-    if (!isLoaded || !isSignedIn) return
-    ;(async () => {
-      console.log("[shopkeepers.page] load campaigns: start")
+    const fetchCampaigns = async () => {
       try {
-        const res = await fetch("/api/campaigns", { credentials: "include" })
-        const { data, raw } = await parseJsonSafe(res)
-        console.log("[shopkeepers.page] load campaigns: response", { ok: res.ok, status: res.status, len: raw.length })
-        if (!res.ok) throw new Error(raw || "Failed to load campaigns")
-        const list: CampaignOption[] = data.campaigns || []
-        setCampaigns(list)
-        if (!selectedCampaignId && list?.[0]?.id) {
-          setSelectedCampaignId(list[0].id)
-          console.log("[shopkeepers.page] default campaign set", { id: list[0].id })
-        }
-      } catch (e: any) {
-        showError("Failed to load campaigns", String(e?.message || e))
-      }
-    })()
-  }, [isLoaded, isSignedIn]) // eslint-disable-line
+        const response = await fetch("/api/campaigns")
+        if (!response.ok) throw new Error("Failed to fetch campaigns")
 
-  // Load shopkeepers for a campaign
-  const loadShopkeepers = async (cid: string) => {
-    setLoading(true)
-    console.log("[shopkeepers.page] load shopkeepers: start", { campaignId: cid })
+        const data = await response.json()
+        const campaignsList = data.campaigns || []
+        setCampaigns(campaignsList)
+
+        // Set selected campaign from URL or first available
+        if (urlCampaignId && campaignsList.find((c: Campaign) => c.id === urlCampaignId)) {
+          setSelectedCampaignId(urlCampaignId)
+        } else if (campaignsList.length > 0) {
+          setSelectedCampaignId(campaignsList[0].id)
+        }
+      } catch (error) {
+        console.error("Error fetching campaigns:", error)
+        toast({
+          title: "Error",
+          description: "Failed to load campaigns",
+          variant: "destructive",
+        })
+      }
+    }
+
+    fetchCampaigns()
+  }, [urlCampaignId, toast])
+
+  // Load shopkeepers when campaign changes
+  useEffect(() => {
+    if (selectedCampaignId) {
+      fetchShopkeepers()
+      fetchPlayersGold()
+    }
+  }, [selectedCampaignId])
+
+  // Auto-generate if requested
+  useEffect(() => {
+    if (autoGenerate && selectedCampaignId && shopkeepers.length === 0) {
+      handleGenerateShopkeepers()
+    }
+  }, [autoGenerate, selectedCampaignId, shopkeepers.length])
+
+  const fetchShopkeepers = async () => {
+    if (!selectedCampaignId) return
+
     try {
-      const res = await fetch(`/api/shopkeepers?campaignId=${encodeURIComponent(cid)}`, { credentials: "include" })
-      const { data, raw } = await parseJsonSafe(res)
-      console.log("[shopkeepers.page] load shopkeepers: response", { ok: res.ok, status: res.status, len: raw.length })
-      if (!res.ok) throw new Error(raw || "Failed to load shopkeepers")
+      setLoading(true)
+      console.log("[ShopkeepersPage] Fetching shopkeepers for campaign:", selectedCampaignId)
+
+      const response = await fetch(`/api/shopkeepers?campaignId=${selectedCampaignId}`)
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || `HTTP ${response.status}`)
+      }
+
+      const data = await response.json()
+      console.log("[ShopkeepersPage] Shopkeepers response:", data)
+
       setShopkeepers(data.shopkeepers || [])
-      setCampaignAccessEnabled(Boolean(data.campaign?.access_enabled))
-      setIsOwner(Boolean(data.campaign?.isOwner))
-      console.log("[shopkeepers.page] load shopkeepers: set", {
-        items: (data.shopkeepers || []).length,
-        access: Boolean(data.campaign?.access_enabled),
-        isOwner: Boolean(data.campaign?.isOwner),
+    } catch (error) {
+      console.error("[ShopkeepersPage] Error fetching shopkeepers:", error)
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to load shopkeepers",
+        variant: "destructive",
       })
-    } catch (e: any) {
-      showError("Error loading shopkeepers", String(e?.message || e))
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => {
-    if (selectedCampaignId) loadShopkeepers(selectedCampaignId)
-  }, [selectedCampaignId]) // eslint-disable-line
-
-  // Generate (now allows 1–20 and tops up only the delta)
-  const onGenerate = async () => {
+  const fetchPlayersGold = async () => {
     if (!selectedCampaignId) return
-    console.log("[shopkeepers.page] generate: start", { campaignId: selectedCampaignId, count })
-    setGenerating(true)
+
     try {
-      const res = await fetch("/api/shopkeepers/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ campaignId: selectedCampaignId, count }),
-      })
-      const clone = res.clone()
-      let data: any = null
-      let raw = ""
-      try {
-        data = await clone.json()
-        raw = JSON.stringify(data)
-      } catch {
-        raw = await res.text().catch(() => "")
+      const response = await fetch(`/api/players/gold?campaignId=${selectedCampaignId}`)
+      if (response.ok) {
+        const data = await response.json()
+        setPlayersGold(data.rows || [])
       }
-      console.log("[shopkeepers.page] generate: response", { ok: res.ok, status: res.status, len: raw.length, data })
-      if (!res.ok) throw new Error(raw || "Generation failed")
-
-      const createdCount = Number(data?.createdCount ?? 0)
-      toast({
-        title:
-          createdCount > 0
-            ? `Created ${createdCount} shopkeeper${createdCount === 1 ? "" : "s"}`
-            : "No new shopkeepers created",
-        className: createdCount > 0 ? "bg-green-600 text-white" : "bg-gray-700 text-white",
-      })
-
-      await loadShopkeepers(selectedCampaignId)
-    } catch (e: any) {
-      const msg = String(e?.message || e)
-      console.error("[shopkeepers.page] generate error", { msg })
-      toast({ title: "Generation error", description: msg, className: "bg-red-600 text-white" })
-    } finally {
-      setGenerating(false)
-      console.log("[shopkeepers.page] generate: end")
+    } catch (error) {
+      console.error("Error fetching players gold:", error)
     }
   }
 
-  // Quick seed 5 when you have zero
-  const onQuickSeed = async () => {
+  const handleGenerateShopkeepers = async () => {
     if (!selectedCampaignId) return
-    setSeeding(true)
-    console.log("[shopkeepers.page] quick-seed: start", { campaignId: selectedCampaignId })
+
     try {
-      const res = await fetch("/api/shopkeepers/quick-seed", {
+      setGenerating(true)
+      console.log("[ShopkeepersPage] Generating shopkeepers for campaign:", selectedCampaignId)
+
+      const response = await fetch("/api/shopkeepers/generate", {
         method: "POST",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ campaignId: selectedCampaignId }),
-      })
-      const { data, raw } = await parseJsonSafe(res)
-      console.log("[shopkeepers.page] quick-seed: response", { ok: res.ok, status: res.status, len: raw.length })
-      if (!res.ok) throw new Error(raw || "Seed failed")
-      toast({ title: "Added 5 shopkeepers", className: "bg-green-600 text-white" })
-      await loadShopkeepers(selectedCampaignId)
-    } catch (e: any) {
-      showError("Seed error", String(e?.message || e))
-    } finally {
-      setSeeding(false)
-    }
-  }
-
-  // Toggle access
-  const toggleAccess = async () => {
-    if (!selectedCampaignId) return
-    console.log("[shopkeepers.page] toggle access: start", {
-      campaignId: selectedCampaignId,
-      next: !campaignAccessEnabled,
-    })
-    try {
-      const res = await fetch(`/api/campaigns/${selectedCampaignId}/shop-access`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ access_enabled: !campaignAccessEnabled }),
-      })
-      const { data, raw } = await parseJsonSafe(res)
-      console.log("[shopkeepers.page] toggle access: response", { ok: res.ok, status: res.status, len: raw.length })
-      if (!res.ok) throw new Error(raw || "Failed to update")
-      setCampaignAccessEnabled(Boolean(data.campaign?.access_enabled))
-      toast({
-        title: `Shop access ${data.campaign?.access_enabled ? "enabled" : "disabled"}`,
-        className: "bg-green-600 text-white",
-      })
-    } catch (e: any) {
-      showError("Error", String(e?.message || e))
-    }
-  }
-
-  // Remove a shopkeeper (soft delete)
-  const onRemove = async (shopkeeperId: string) => {
-    if (!selectedCampaignId) return
-    if (!confirm("Remove this shopkeeper from the campaign?")) return
-    try {
-      const res = await fetch(`/api/shopkeepers/${encodeURIComponent(shopkeeperId)}`, {
-        method: "DELETE",
-        credentials: "include",
-      })
-      const { data, raw } = await parseJsonSafe(res)
-      console.log("[shopkeepers.page] remove: response", { ok: res.ok, status: res.status, len: raw.length })
-      if (!res.ok) throw new Error(raw || "Failed to remove")
-      toast({ title: "Shopkeeper removed", className: "bg-green-600 text-white" })
-      await loadShopkeepers(selectedCampaignId)
-    } catch (e: any) {
-      showError("Remove error", String(e?.message || e))
-    }
-  }
-
-  // Auto-generate (server enforces permissions)
-  const autoGenTriggered = useRef(false)
-  const shouldAutoGenerate = useMemo(() => {
-    const ag = search.get("autoGenerate")
-    return ag === "1" || ag === "true"
-  }, [search])
-
-  useEffect(() => {
-    if (!selectedCampaignId) return
-    if (!shouldAutoGenerate) return
-    if (autoGenTriggered.current) return
-    const c = Number(search.get("count") || "")
-    if (Number.isFinite(c) && c >= 1 && c <= 20) setCount(c)
-    autoGenTriggered.current = true
-    console.log("[shopkeepers.page] auto-generate: trigger", { campaignId: selectedCampaignId, count: c || count })
-    onGenerate()
-  }, [selectedCampaignId, shouldAutoGenerate]) // eslint-disable-line
-
-  const updateInventory = async (inventoryId: string, action: "increment" | "decrement") => {
-    try {
-      const response = await fetch(`/api/shopkeepers/inventory/${inventoryId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ action }),
       })
 
       if (!response.ok) {
         const errorData = await response.json()
-        showError("Inventory update failed", JSON.stringify(errorData))
-        return
+        throw new Error(errorData.error || "Failed to generate shopkeepers")
       }
 
       const data = await response.json()
-      console.log("[shopkeepers.page] inventory updated", { inventoryId, action, data })
+      console.log("[ShopkeepersPage] Generated shopkeepers:", data)
 
-      // Refresh the shopkeepers list to show updated quantities
-      await loadShopkeepers(selectedCampaignId)
+      toast({
+        title: "Success",
+        description: `Generated ${data.shopkeepers?.length || 0} shopkeepers!`,
+      })
+
+      await fetchShopkeepers()
     } catch (error) {
-      console.error("[shopkeepers.page] inventory update error", error)
-      showError("Inventory update failed", "Network error")
+      console.error("[ShopkeepersPage] Error generating shopkeepers:", error)
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to generate shopkeepers",
+        variant: "destructive",
+      })
+    } finally {
+      setGenerating(false)
     }
   }
 
-  if (!isLoaded) {
-    return (
-      <div className="h-screen bg-gray-900 text-white flex items-center justify-center">
-        <Loader2 className="h-10 w-10 animate-spin text-purple-500" />
-        <p className="ml-3 text-gray-400">Loading...</p>
-      </div>
-    )
+  const handleUpdatePlayerGold = async (playerId: string, newAmount: number) => {
+    try {
+      const response = await fetch("/api/players/gold", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          playerId,
+          campaignId: selectedCampaignId,
+          goldAmount: newAmount,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to update gold")
+      }
+
+      toast({
+        title: "Success",
+        description: "Player gold updated successfully",
+      })
+
+      await fetchPlayersGold()
+    } catch (error) {
+      console.error("Error updating player gold:", error)
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to update gold",
+        variant: "destructive",
+      })
+    }
   }
-  if (!isSignedIn) return <RedirectToSignIn />
+
+  const selectedCampaign = campaigns.find((c) => c.id === selectedCampaignId)
+  const isDM = selectedCampaign?.is_owner || selectedCampaign?.member_role === "DM"
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
-      <div className="mx-auto max-w-7xl px-4 py-6">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl font-bold text-purple-400">Shopkeepers</h1>
-          <div className="flex gap-2">
-            <Button
-              onClick={() => router.push("/")}
-              variant="secondary"
-              className="bg-gray-800 border border-gray-700 text-white"
-              title="Go Home"
-            >
-              <Home className="w-4 h-4 mr-2" /> Home
-            </Button>
-
-            <Select value={selectedCampaignId || ""} onValueChange={(v) => setSelectedCampaignId(v)}>
-              <SelectTrigger className="bg-gray-800 border-gray-700 text-white w-64">
-                <SelectValue placeholder="Select campaign" />
-              </SelectTrigger>
-              <SelectContent className="bg-gray-800 border-gray-700 text-white">
-                {campaigns.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Input
-              placeholder="Session id (optional for activity log)"
-              value={sessionId}
-              onChange={(e) => setSessionId(e.target.value)}
-              className="bg-gray-800 border-gray-700 text-white w-64"
-            />
-
-            <Button
-              onClick={() => selectedCampaignId && loadShopkeepers(selectedCampaignId)}
-              variant="secondary"
-              className="bg-gray-800 border border-gray-700 text-white"
-            >
-              <RefreshCw className="w-4 h-4 mr-2" /> Refresh
-            </Button>
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex items-center gap-4 mb-8">
+          <Button variant="ghost" onClick={() => router.push("/")} className="text-gray-400 hover:text-white">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Home
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold flex items-center gap-2">
+              <Store className="h-8 w-8" />
+              Shopkeepers
+            </h1>
+            <p className="text-gray-400">Manage NPCs and shops for your campaign</p>
           </div>
         </div>
 
-        {/* Generation status */}
-        {generating && (
-          <div className="mb-4 p-3 rounded border border-yellow-600/40 bg-yellow-500/10 text-yellow-200 flex items-center gap-3">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            <div>
-              <div className="font-medium">Generating shopkeepers...</div>
-              <div className="text-xs opacity-80">Creating up to {count} total active shopkeepers.</div>
-            </div>
-          </div>
-        )}
-
-        <Tabs defaultValue="market">
-          <TabsList className="bg-gray-800">
-            <TabsTrigger value="market">Market</TabsTrigger>
-            <TabsTrigger value="management">Management</TabsTrigger>
-            <TabsTrigger value="players">Players</TabsTrigger>
-          </TabsList>
-
-          {/* Market Tab */}
-          <TabsContent value="market" className="mt-4">
-            {/* Show DM controls at top; hidden for non-owners */}
-            {isOwner && (
-              <Card className="bg-gray-800 border-gray-700 mb-4">
-                <CardContent className="py-4 flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <Label className="text-gray-300">Generate count</Label>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={20}
-                      value={count}
-                      onChange={(e) => setCount(Math.max(1, Math.min(20, Number.parseInt(e.target.value || "1", 10))))}
-                      className="w-24 bg-gray-900 border-gray-700 text-white"
-                    />
-                  </div>
-                  <Button
-                    onClick={onGenerate}
-                    className="bg-purple-600 hover:bg-purple-700 text-white"
-                    disabled={generating || !selectedCampaignId}
-                    title="Generate new shopkeepers"
-                  >
-                    {generating ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
-                    Generate Shopkeepers
-                  </Button>
-                  <Button
-                    onClick={toggleAccess}
-                    variant="secondary"
-                    className="bg-gray-900 border border-gray-700 text-white"
-                  >
-                    <ToggleRight className="w-4 h-4 mr-2" />
-                    {campaignAccessEnabled ? "Disable player access" : "Enable player access"}
-                  </Button>
-                </CardContent>
-              </Card>
-            )}
-
-            {loading ? (
-              <div className="flex items-center text-gray-400">
-                <Loader2 className="w-4 h-4 animate-spin mr-2" /> Loading shopkeepers...
+        {/* Campaign Selection */}
+        <Card className="bg-gray-800 border-gray-700 mb-6">
+          <CardHeader>
+            <CardTitle>Select Campaign</CardTitle>
+            <CardDescription>Choose which campaign's shopkeepers to manage</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-4 items-center">
+              <div className="flex-1">
+                <Label htmlFor="campaign-select">Campaign</Label>
+                <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
+                  <SelectTrigger className="bg-gray-700 border-gray-600">
+                    <SelectValue placeholder="Select a campaign" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-gray-800 border-gray-700">
+                    {campaigns.map((campaign) => (
+                      <SelectItem key={campaign.id} value={campaign.id}>
+                        {campaign.name}{" "}
+                        {campaign.is_owner ? "(Owner)" : campaign.is_member ? `(${campaign.member_role})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-            ) : shopkeepers.length === 0 ? (
-              <div className="flex flex-col items-start gap-3 text-gray-400">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-yellow-300" />
-                  <p>No shopkeepers yet.</p>
-                </div>
-                {isOwner && (
-                  <Button
-                    onClick={onQuickSeed}
-                    disabled={seeding || !selectedCampaignId}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                    title="Quickly add 5 random shopkeepers to get started"
-                  >
-                    {seeding ? (
-                      <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                    ) : (
-                      <Sparkles className="w-4 h-4 mr-2" />
-                    )}
-                    Quick add 5 shopkeepers
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {shopkeepers.map((sk) => (
-                  <Card key={sk.id} className="bg-gray-800 border-gray-700 relative overflow-hidden">
-                    {/* Soft diffused color blob */}
-                    <div
-                      className="pointer-events-none absolute -top-8 -right-8 w-40 h-40 rounded-full blur-2xl"
-                      style={blobStyleFor(sk.id)}
-                      aria-hidden="true"
-                    />
-                    <CardHeader>
-                      <CardTitle className="flex items-center justify-between">
-                        <span className="flex items-center gap-2">
-                          {sk.name} <span className="text-xs text-gray-400">({sk.shop_type})</span>
-                        </span>
-                        <div className="flex items-center gap-2">
-                          {isOwner && (
-                            <Button
-                              size="icon"
-                              variant="secondary"
-                              className="bg-gray-900 border border-gray-700 text-red-200 hover:text-white"
-                              title="Remove shopkeeper"
-                              onClick={() => onRemove(sk.id)}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          )}
-                          {sk.image_url ? (
-                            <img
-                              src={sk.image_url || "/placeholder.svg?height=48&width=48&query=shopkeeper%20token"}
-                              alt={`${sk.name} token`}
-                              className="w-12 h-12 rounded-full object-cover border border-gray-600"
-                            />
-                          ) : (
-                            <div className="w-12 h-12 rounded-full bg-gray-700 border border-gray-600" />
-                          )}
-                        </div>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <p className="text-sm text-gray-300">
-                        {sk.race}, {sk.alignment}, {sk.age} yrs
-                      </p>
-                      <p className="text-sm italic text-gray-400">"{sk.quote}"</p>
-                      <p className="text-xs text-gray-400">{sk.description}</p>
-
-                      <div className="border-t border-gray-700 pt-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="font-semibold text-gray-200">Inventory</span>
-                          <span className="text-xs text-gray-400">{sk.inventory.length} items</span>
-                        </div>
-                        <div className="space-y-2">
-                          {sk.inventory.map((it) => (
-                            <div key={it.id} className="flex items-center justify-between text-sm">
-                              <div className="min-w-0">
-                                <div className="font-medium text-gray-200 truncate">{it.item_name}</div>
-                                <div className="text-xs text-gray-400">
-                                  {it.rarity} • {it.final_price} gp • stock {it.stock_quantity}
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                {isOwner ? (
-                                  <>
-                                    <Button
-                                      size="sm"
-                                      variant="secondary"
-                                      className="bg-gray-700 text-white"
-                                      onClick={() => {
-                                        updateInventory(it.id, "decrement")
-                                      }}
-                                      title="Remove one (DM)"
-                                    >
-                                      -1
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="secondary"
-                                      className="bg-gray-700 text-white"
-                                      onClick={() => {
-                                        updateInventory(it.id, "increment")
-                                      }}
-                                      title="Add one (DM)"
-                                    >
-                                      +1
-                                    </Button>
-                                  </>
-                                ) : (
-                                  <Button
-                                    size="sm"
-                                    className="bg-purple-600 hover:bg-purple-700 text-white"
-                                    onClick={() => {
-                                      /* hook up purchase when ready */
-                                    }}
-                                    disabled={it.stock_quantity <= 0 || !campaignAccessEnabled}
-                                    title="Buy 1"
-                                  >
-                                    <ShoppingCart className="w-4 h-4 mr-1" /> Buy
-                                  </Button>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </TabsContent>
-
-          {/* Management Tab */}
-          <TabsContent value="management" className="mt-4">
-            {isOwner ? (
-              <>
-                <Card className="bg-gray-800 border-gray-700 mb-4">
-                  <CardContent className="py-4 flex flex-wrap items-center gap-3">
-                    <div className="flex items-center gap-2">
-                      <Label className="text-gray-300">Generate count</Label>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={20}
-                        value={count}
-                        onChange={(e) =>
-                          setCount(Math.max(1, Math.min(20, Number.parseInt(e.target.value || "1", 10))))
-                        }
-                        className="w-24 bg-gray-900 border-gray-700 text-white"
-                      />
-                    </div>
-                    <Button
-                      onClick={onGenerate}
-                      className="bg-purple-600 hover:bg-purple-700 text-white"
-                      disabled={generating || !selectedCampaignId}
-                    >
-                      {generating ? (
-                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                      ) : (
-                        <Plus className="w-4 h-4 mr-2" />
-                      )}{" "}
+              {isDM && (
+                <Button
+                  onClick={handleGenerateShopkeepers}
+                  disabled={!selectedCampaignId || generating}
+                  className="bg-purple-600 hover:bg-purple-700"
+                >
+                  {generating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4 mr-2" />
                       Generate Shopkeepers
-                    </Button>
-                    <Button
-                      onClick={toggleAccess}
-                      variant="secondary"
-                      className="bg-gray-900 border border-gray-700 text-white"
-                    >
-                      <ToggleRight className="w-4 h-4 mr-2" />
-                      {campaignAccessEnabled ? "Disable player access" : "Enable player access"}
-                    </Button>
-                    {shopkeepers.length === 0 && (
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {selectedCampaignId ? (
+          <Tabs defaultValue="shopkeepers" className="space-y-6">
+            <TabsList className="bg-gray-800">
+              <TabsTrigger value="shopkeepers" className="flex items-center gap-2">
+                <Store className="h-4 w-4" />
+                Shopkeepers ({shopkeepers.length})
+              </TabsTrigger>
+              {isDM && (
+                <TabsTrigger value="players" className="flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Player Gold
+                </TabsTrigger>
+              )}
+            </TabsList>
+
+            <TabsContent value="shopkeepers" className="space-y-6">
+              {loading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="flex items-center gap-3">
+                    <Loader2 className="h-6 w-6 animate-spin text-purple-500" />
+                    <span>Loading shopkeepers...</span>
+                  </div>
+                </div>
+              ) : shopkeepers.length === 0 ? (
+                <Card className="bg-gray-800 border-gray-700">
+                  <CardContent className="flex flex-col items-center justify-center py-12">
+                    <Store className="h-12 w-12 text-gray-400 mb-4" />
+                    <h3 className="text-lg font-semibold mb-2">No Shopkeepers Yet</h3>
+                    <p className="text-gray-400 text-center mb-4">This campaign doesn't have any shopkeepers yet.</p>
+                    {isDM && (
                       <Button
-                        onClick={onQuickSeed}
-                        disabled={seeding || !selectedCampaignId}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                        title="Quickly add 5 random shopkeepers to get started"
+                        onClick={handleGenerateShopkeepers}
+                        disabled={generating}
+                        className="bg-purple-600 hover:bg-purple-700"
                       >
-                        {seeding ? (
-                          <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                        {generating ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Generating...
+                          </>
                         ) : (
-                          <Sparkles className="w-4 h-4 mr-2" />
+                          <>
+                            <Sparkles className="h-4 w-4 mr-2" />
+                            Generate Shopkeepers
+                          </>
                         )}
-                        Quick add 5 shopkeepers
                       </Button>
                     )}
                   </CardContent>
                 </Card>
-              </>
-            ) : (
-              <p className="text-gray-400">Only the DM can access management.</p>
-            )}
-          </TabsContent>
+              ) : (
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {shopkeepers.map((shopkeeper) => (
+                    <Card key={shopkeeper.id} className="bg-gray-800 border-gray-700">
+                      <CardHeader>
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <CardTitle className="text-lg">{shopkeeper.name}</CardTitle>
+                            <CardDescription>
+                              {shopkeeper.race} • {shopkeeper.shop_type}
+                            </CardDescription>
+                          </div>
+                          <Badge variant="outline">{shopkeeper.alignment}</Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div>
+                          <p className="text-sm text-gray-300 italic">"{shopkeeper.quote}"</p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-gray-400">{shopkeeper.description}</p>
+                        </div>
+                        <div>
+                          <h4 className="font-medium mb-2">Inventory ({shopkeeper.inventory.length} items)</h4>
+                          <div className="space-y-1 max-h-32 overflow-y-auto">
+                            {shopkeeper.inventory.slice(0, 5).map((item) => (
+                              <div key={item.id} className="flex justify-between text-sm">
+                                <span className="truncate">{item.item_name}</span>
+                                <span className="text-yellow-400">{item.final_price}gp</span>
+                              </div>
+                            ))}
+                            {shopkeeper.inventory.length > 5 && (
+                              <p className="text-xs text-gray-500">+{shopkeeper.inventory.length - 5} more items...</p>
+                            )}
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
 
-          <TabsContent value="players" className="mt-4">
-            <p className="text-gray-400">Only the DM can edit player gold.</p>
-          </TabsContent>
-        </Tabs>
+            {isDM && (
+              <TabsContent value="players" className="space-y-6">
+                <Card className="bg-gray-800 border-gray-700">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Coins className="h-5 w-5" />
+                      Player Gold Management
+                    </CardTitle>
+                    <CardDescription>Manage gold amounts for players in this campaign</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {playersGold.length === 0 ? (
+                      <div className="text-center py-8 text-gray-400">
+                        <Coins className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                        <p>No player gold records found</p>
+                        <p className="text-sm">Gold records are created when players make purchases</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {playersGold.map((playerGold) => (
+                          <div
+                            key={playerGold.player_id}
+                            className="flex items-center justify-between p-4 bg-gray-700 rounded-lg"
+                          >
+                            <div>
+                              <p className="font-medium">{playerGold.player_id.substring(0, 12)}...</p>
+                              <p className="text-sm text-gray-400">Player ID</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Input
+                                type="number"
+                                value={playerGold.gold_amount}
+                                onChange={(e) => {
+                                  const newAmount = Number.parseFloat(e.target.value) || 0
+                                  setPlayersGold((prev) =>
+                                    prev.map((p) =>
+                                      p.player_id === playerGold.player_id ? { ...p, gold_amount: newAmount } : p,
+                                    ),
+                                  )
+                                }}
+                                className="w-24 bg-gray-600 border-gray-500"
+                                min="0"
+                                step="0.01"
+                              />
+                              <span className="text-yellow-400 font-medium">gp</span>
+                              <Button
+                                size="sm"
+                                onClick={() => handleUpdatePlayerGold(playerGold.player_id, playerGold.gold_amount)}
+                                className="bg-green-600 hover:bg-green-700"
+                              >
+                                Update
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            )}
+          </Tabs>
+        ) : (
+          <Card className="bg-gray-800 border-gray-700">
+            <CardContent className="flex items-center justify-center py-12">
+              <div className="text-center text-gray-400">
+                <Store className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>Select a campaign to view its shopkeepers</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   )

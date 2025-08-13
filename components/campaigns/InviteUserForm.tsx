@@ -3,12 +3,11 @@
 import type React from "react"
 
 import { useState } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { UserPlus, Loader2, CheckCircle, AlertCircle } from "lucide-react"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { UserPlus, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 interface InviteUserFormProps {
@@ -18,9 +17,7 @@ interface InviteUserFormProps {
 
 export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormProps) {
   const [userIdToInvite, setUserIdToInvite] = useState("")
-  const [role, setRole] = useState("Player")
   const [isInviting, setIsInviting] = useState(false)
-  const [inviteResult, setInviteResult] = useState<{ success: boolean; message: string } | null>(null)
   const { toast } = useToast()
 
   const handleInvite = async (e: React.FormEvent) => {
@@ -36,52 +33,39 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
     }
 
     setIsInviting(true)
-    setInviteResult(null)
 
     try {
-      const response = await fetch(`/api/campaigns/${campaignId}/invite`, {
+      console.log("[InviteUserForm] Inviting user", { campaignId, userIdToInvite: userIdToInvite.trim() })
+
+      const response = await fetch("/api/invite", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          campaignId,
           userIdToInvite: userIdToInvite.trim(),
-          role,
+          name: "Invited User", // This field is not used anymore but kept for compatibility
         }),
       })
 
       const data = await response.json()
+      console.log("[InviteUserForm] Invite response", { status: response.status, data })
 
-      if (response.ok) {
-        setInviteResult({
-          success: true,
-          message: data.message || "User invited successfully!",
-        })
-        setUserIdToInvite("")
-        setRole("Player")
-
-        toast({
-          title: "Success",
-          description: data.message || "User invited successfully!",
-        })
-
-        // Notify parent component
-        onInviteSuccess?.()
-      } else {
+      if (!response.ok) {
         throw new Error(data.error || "Failed to invite user")
       }
-    } catch (error) {
-      console.error("Error inviting user:", error)
-      const errorMessage = error instanceof Error ? error.message : "Failed to invite user"
-
-      setInviteResult({
-        success: false,
-        message: errorMessage,
-      })
 
       toast({
+        title: "Success",
+        description: data.message || "User invited successfully!",
+      })
+
+      setUserIdToInvite("")
+      onInviteSuccess?.()
+    } catch (error) {
+      console.error("[InviteUserForm] Invite error", error)
+      toast({
         title: "Error",
-        description: errorMessage,
+        description: error instanceof Error ? error.message : "Failed to invite user",
         variant: "destructive",
       })
     } finally {
@@ -89,57 +73,34 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
     }
   }
 
-  const validateUserId = (userId: string) => {
-    // Basic validation for Clerk user IDs
-    return userId.startsWith("user_") && userId.length > 10
-  }
-
   return (
-    <Card>
+    <Card className="bg-gray-800 border-gray-700">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <UserPlus className="h-5 w-5" />
           Invite Player
         </CardTitle>
-        <CardDescription>Add a new player to this campaign by entering their user ID</CardDescription>
+        <CardDescription>Add a new player to this campaign by their user ID</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleInvite} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="userId">User ID</Label>
+          <div>
+            <Label htmlFor="userIdToInvite">User ID (Clerk ID)</Label>
             <Input
-              id="userId"
-              type="text"
-              placeholder="user_2ABC123DEF456GHI789"
+              id="userIdToInvite"
               value={userIdToInvite}
               onChange={(e) => setUserIdToInvite(e.target.value)}
+              placeholder="user_2ABC123DEF456GHI789"
+              className="bg-gray-700 border-gray-600 text-white"
               disabled={isInviting}
-              className={userIdToInvite && !validateUserId(userIdToInvite) ? "border-red-500 focus:border-red-500" : ""}
             />
-            {userIdToInvite && !validateUserId(userIdToInvite) && (
-              <p className="text-sm text-red-500">
-                User ID should start with "user_" and be at least 10 characters long
-              </p>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="role">Role</Label>
-            <Select value={role} onValueChange={setRole} disabled={isInviting}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select role" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Player">Player</SelectItem>
-                <SelectItem value="DM">Dungeon Master</SelectItem>
-              </SelectContent>
-            </Select>
+            <p className="text-sm text-gray-400 mt-1">Enter the Clerk user ID (starts with "user_")</p>
           </div>
 
           <Button
             type="submit"
-            disabled={isInviting || !userIdToInvite.trim() || !validateUserId(userIdToInvite)}
-            className="w-full"
+            disabled={!userIdToInvite.trim() || isInviting}
+            className="w-full bg-purple-600 hover:bg-purple-700"
           >
             {isInviting ? (
               <>
@@ -149,24 +110,20 @@ export function InviteUserForm({ campaignId, onInviteSuccess }: InviteUserFormPr
             ) : (
               <>
                 <UserPlus className="h-4 w-4 mr-2" />
-                Invite Player
+                Send Invite
               </>
             )}
           </Button>
-
-          {inviteResult && (
-            <div
-              className={`flex items-center gap-2 p-3 rounded-md ${
-                inviteResult.success
-                  ? "bg-green-50 text-green-800 border border-green-200"
-                  : "bg-red-50 text-red-800 border border-red-200"
-              }`}
-            >
-              {inviteResult.success ? <CheckCircle className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
-              <span className="text-sm">{inviteResult.message}</span>
-            </div>
-          )}
         </form>
+
+        <div className="mt-6 p-4 bg-gray-700 rounded-lg">
+          <h4 className="font-medium mb-2">How to find a User ID:</h4>
+          <ol className="list-decimal list-inside space-y-1 text-sm text-gray-300">
+            <li>Ask the user to copy their ID from the main page (copy button next to their name)</li>
+            <li>Or check your Clerk Dashboard → Users section</li>
+            <li>User IDs start with "user_" followed by random characters</li>
+          </ol>
+        </div>
       </CardContent>
     </Card>
   )

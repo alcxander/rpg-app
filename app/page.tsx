@@ -1,538 +1,619 @@
 "use client"
 
-import { useUser, RedirectToSignIn } from "@clerk/nextjs"
-import { useRouter, useSearchParams } from "next/navigation"
-import { useEffect, useState, useMemo, useCallback } from "react"
+import { useEffect } from "react"
+
+import { useCallback } from "react"
+
+import { useMemo } from "react"
+
+import { useState } from "react"
+
+import { useUser } from "@clerk/nextjs"
 import { Button } from "@/components/ui/button"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Badge } from "@/components/ui/badge"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
-import { useToast } from "@/hooks/use-toast"
-import { ToastAction } from "@/components/ui/toast"
-import { BattleForm } from "@/components/BattleForm"
-import { LootForm } from "@/components/LootForm"
-import { LootResults } from "@/components/LootResults"
-import { LootHistory } from "@/components/LootHistory"
-import { CanvasMap } from "@/components/CanvasMap"
-import { Initiative } from "@/components/Initiative"
-import { ChatMessages } from "@/components/ChatMessages"
-import { TokenList } from "@/components/TokenList"
-import { useRealtimeSession } from "@/hooks/useRealtimeSession"
-import { useSessionChat } from "@/hooks/useSessionChat"
-import type { CampaignOption, MapToken, BattleEntity } from "@/types"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
-  Plus,
-  RefreshCw,
-  Loader2,
-  Users,
-  ShoppingBag,
-  Sword,
-  Dice6,
-  Map,
-  MessageSquare,
-  Crown,
-  UserPlus,
-  Copy,
-} from "lucide-react"
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { useToast } from "@/hooks/use-toast"
+import { Sword, Shield, Users, MapPin, Dice6, Plus } from "lucide-react"
 
-interface SessionState {
+import BattleForm from "@/components/BattleForm"
+import LootForm from "@/components/LootForm"
+import LootResults from "@/components/LootResults"
+import LootHistory from "@/components/LootHistory"
+import CanvasMap from "@/components/CanvasMap"
+import Initiative from "@/components/Initiative"
+import ChatMessages from "@/components/ChatMessages"
+import TokenList from "@/components/TokenList"
+import StatBlock from "@/components/StatBlock"
+
+import { useSessionChat } from "@/hooks/useSessionChat"
+import { useRealtimeSession } from "@/hooks/useRealtimeSession"
+
+import type { Battle, LootResult, MapToken } from "@/types"
+
+interface Campaign {
   id: string
   name: string
-  campaign_id: string
-  dm_id: string
-  created_at: string
-  background_image?: string
-  map?: any
+  owner_id: string
+  is_owner: boolean
+  is_member: boolean
+  member_role: string | null
 }
 
 export default function HomePage() {
-  const router = useRouter()
-  const search = useSearchParams()
-  const { isLoaded, isSignedIn, user } = useUser()
+  const { user } = useUser()
   const { toast } = useToast()
 
-  const [campaigns, setCampaigns] = useState<CampaignOption[]>([])
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
-  const [sessionName, setSessionName] = useState("")
-  const [sessionId, setSessionId] = useState<string | null>(null)
-  const [sessionState, setSessionState] = useState<SessionState | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [battleEntities, setBattleEntities] = useState<BattleEntity[]>([])
-  const [lootResults, setLootResults] = useState<any[]>([])
-  const [showLootHistory, setShowLootHistory] = useState(false)
+  // State management
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [selectedCampaign, setSelectedCampaign] = useState<string>("")
+  const [sessions, setSessions] = useState<any[]>([])
+  const [selectedSession, setSelectedSession] = useState<string>("")
+  const [battles, setBattles] = useState<Battle[]>([])
+  const [selectedBattle, setSelectedBattle] = useState<string>("")
+  const [lootResults, setLootResults] = useState<LootResult[]>([])
+  const [isGeneratingBattle, setIsGeneratingBattle] = useState(false)
+  const [isGeneratingLoot, setIsGeneratingLoot] = useState(false)
+  const [showStatBlock, setShowStatBlock] = useState(false)
+  const [selectedCreature, setSelectedCreature] = useState<any>(null)
 
-  // Realtime session hook
-  const { session: realtimeSession, loading: sessionLoading, error: sessionError } = useRealtimeSession(sessionId)
+  // Session state from realtime hook
+  const { sessionState, updateSessionState } = useRealtimeSession(selectedSession)
 
-  // Chat hook
-  const { messages, sendMessage, isConnected } = useSessionChat(sessionId)
+  // Chat functionality
+  const { messages, sendMessage, isLoading: isChatLoading } = useSessionChat(selectedSession)
 
-  // Safe map access
+  // Memoized map data with null safety
   const memoMap = useMemo(() => sessionState?.map ?? null, [sessionState?.map])
 
   // Convert a battle's monsters/allies into MapToken[] snapshot
   const tokensFromBattle = useCallback((battle: any): MapToken[] => {
     if (!battle?.entities) return []
-    return battle.entities.map((ent: any) => ({
-      id: ent.id,
-      name: ent.name,
-      x: ent.x || 0,
-      y: ent.y || 0,
-      imageUrl: ent.image_url || "",
-      isPlayer: ent.type === "ally",
+
+    return battle.entities.map((entity: any, index: number) => ({
+      id: `${entity.name}-${index}`,
+      name: entity.name,
+      x: 100 + index * 60,
+      y: 100,
+      imageUrl: entity.token_image || "/placeholder.svg?height=50&width=50",
+      isPlayer: entity.type === "ally",
+      hp: entity.hp,
+      maxHp: entity.max_hp || entity.hp,
+      ac: entity.ac,
+      initiativeOrder: entity.initiative_order || 0,
     }))
   }, [])
 
-  const parseJsonSafe = async (res: Response) => {
-    const clone = res.clone()
+  // Load campaigns on mount
+  useEffect(() => {
+    if (!user) return
+
+    const loadCampaigns = async () => {
+      try {
+        const response = await fetch("/api/campaigns")
+        if (response.ok) {
+          const data = await response.json()
+          setCampaigns(data.campaigns || [])
+        }
+      } catch (error) {
+        console.error("Failed to load campaigns:", error)
+        toast({
+          title: "Error",
+          description: "Failed to load campaigns",
+          variant: "destructive",
+        })
+      }
+    }
+
+    loadCampaigns()
+  }, [user, toast])
+
+  // Load sessions when campaign changes
+  useEffect(() => {
+    if (!selectedCampaign) {
+      setSessions([])
+      setSelectedSession("")
+      return
+    }
+
+    const loadSessions = async () => {
+      try {
+        const response = await fetch(`/api/sessions?campaignId=${selectedCampaign}`)
+        if (response.ok) {
+          const data = await response.json()
+          setSessions(data.sessions || [])
+        }
+      } catch (error) {
+        console.error("Failed to load sessions:", error)
+        toast({
+          title: "Error",
+          description: "Failed to load sessions",
+          variant: "destructive",
+        })
+      }
+    }
+
+    loadSessions()
+  }, [selectedCampaign, toast])
+
+  // Load battles when session changes
+  useEffect(() => {
+    if (!selectedSession) {
+      setBattles([])
+      setSelectedBattle("")
+      return
+    }
+
+    const loadBattles = async () => {
+      try {
+        const response = await fetch(`/api/battles?sessionId=${selectedSession}`)
+        if (response.ok) {
+          const data = await response.json()
+          setBattles(data.battles || [])
+        }
+      } catch (error) {
+        console.error("Failed to load battles:", error)
+      }
+    }
+
+    loadBattles()
+  }, [selectedSession])
+
+  // Create new campaign
+  const createCampaign = async (name: string) => {
     try {
-      const data = await clone.json()
-      return { data, raw: JSON.stringify(data) }
-    } catch {
-      const text = await res.text().catch(() => "")
-      return { data: null as any, raw: text }
+      const response = await fetch("/api/campaigns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setCampaigns((prev) => [...prev, data.campaign])
+        toast({
+          title: "Success",
+          description: "Campaign created successfully",
+        })
+      }
+    } catch (error) {
+      console.error("Failed to create campaign:", error)
+      toast({
+        title: "Error",
+        description: "Failed to create campaign",
+        variant: "destructive",
+      })
     }
   }
 
-  const showError = (title: string, errorRaw: string) => {
-    const raw = String(errorRaw || "").slice(0, 4000)
-    console.error("[home.page] error", { title, raw })
-    toast({
-      title,
-      description: raw,
-      variant: "destructive",
-      className: "bg-red-600 text-white",
-      action: (
-        <ToastAction
-          altText="Copy error"
-          onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(errorRaw)
-            } catch {}
-          }}
-        >
-          Copy
-        </ToastAction>
-      ),
+  // Create new session
+  const createSession = async (name: string) => {
+    if (!selectedCampaign) return
+
+    try {
+      const response = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, campaignId: selectedCampaign }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setSessions((prev) => [...prev, data.session])
+        toast({
+          title: "Success",
+          description: "Session created successfully",
+        })
+      }
+    } catch (error) {
+      console.error("Failed to create session:", error)
+      toast({
+        title: "Error",
+        description: "Failed to create session",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Handle battle generation
+  const handleBattleGenerated = (battle: Battle) => {
+    setBattles((prev) => [...prev, battle])
+    setSelectedBattle(battle.id)
+
+    // Add battle tokens to map if map exists
+    if (memoMap) {
+      const battleTokens = tokensFromBattle(battle)
+      updateSessionState({
+        ...sessionState,
+        tokens: [...(sessionState?.tokens || []), ...battleTokens],
+      })
+    }
+  }
+
+  // Handle loot generation
+  const handleLootGenerated = (result: LootResult) => {
+    setLootResults((prev) => [...prev, result])
+  }
+
+  // Handle map regeneration
+  const regenerateMap = async () => {
+    if (!selectedBattle) return
+
+    try {
+      const response = await fetch(`/api/battles/${selectedBattle}/regenerate-map`, {
+        method: "POST",
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        updateSessionState({
+          ...sessionState,
+          map: data.mapUrl,
+        })
+        toast({
+          title: "Success",
+          description: "Map regenerated successfully",
+        })
+      }
+    } catch (error) {
+      console.error("Failed to regenerate map:", error)
+      toast({
+        title: "Error",
+        description: "Failed to regenerate map",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Handle token updates
+  const handleTokenUpdate = (tokens: MapToken[]) => {
+    updateSessionState({
+      ...sessionState,
+      tokens,
     })
   }
 
-  // Load campaigns
-  useEffect(() => {
-    if (!isLoaded || !isSignedIn) return
-    ;(async () => {
-      console.log("[home.page] load campaigns: start")
-      try {
-        const res = await fetch("/api/campaigns", { credentials: "include" })
-        const { data, raw } = await parseJsonSafe(res)
-        console.log("[home.page] load campaigns: response", { ok: res.ok, status: res.status, len: raw.length })
-        if (!res.ok) throw new Error(raw || "Failed to load campaigns")
-        const list: CampaignOption[] = data.campaigns || []
-        setCampaigns(list)
-        if (!selectedCampaignId && list?.[0]?.id) {
-          setSelectedCampaignId(list[0].id)
-          console.log("[home.page] default campaign set", { id: list[0].id })
-        }
-      } catch (e: any) {
-        showError("Failed to load campaigns", String(e?.message || e))
-      }
-    })()
-  }, [isLoaded, isSignedIn])
-
-  // Auto-join session from URL
-  useEffect(() => {
-    const sid = search.get("sessionId")
-    if (sid && sid !== sessionId) {
-      console.log("[home.page] auto-join session from URL", { sessionId: sid })
-      setSessionId(sid)
-    }
-  }, [search, sessionId])
-
-  // Update session state when realtime session changes
-  useEffect(() => {
-    if (realtimeSession) {
-      console.log("[home.page] updating session state from realtime", realtimeSession)
-      setSessionState(realtimeSession)
-      if (realtimeSession.campaign_id !== selectedCampaignId) {
-        setSelectedCampaignId(realtimeSession.campaign_id)
-      }
-    }
-  }, [realtimeSession, selectedCampaignId])
-
-  // Create session
-  const createSession = async () => {
-    if (!selectedCampaignId || !sessionName.trim()) return
-    setLoading(true)
-    console.log("[home.page] create session: start", { campaignId: selectedCampaignId, name: sessionName })
-    try {
-      const res = await fetch("/api/sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ campaignId: selectedCampaignId, name: sessionName.trim() }),
-      })
-      const { data, raw } = await parseJsonSafe(res)
-      console.log("[home.page] create session: response", { ok: res.ok, status: res.status, len: raw.length })
-      if (!res.ok) throw new Error(raw || "Failed to create session")
-      const newSession = data.session
-      setSessionId(newSession.id)
-      setSessionState(newSession)
-      setSessionName("")
-      toast({ title: "Session created", className: "bg-green-600 text-white" })
-    } catch (e: any) {
-      showError("Failed to create session", String(e?.message || e))
-    } finally {
-      setLoading(false)
-    }
+  // Handle creature click for stat block
+  const handleCreatureClick = (creature: any) => {
+    setSelectedCreature(creature)
+    setShowStatBlock(true)
   }
 
-  // Join session
-  const joinSession = async (sid: string) => {
-    if (!sid.trim()) return
-    console.log("[home.page] join session: start", { sessionId: sid })
-    setSessionId(sid.trim())
-    // The useRealtimeSession hook will handle loading the session data
-  }
-
-  // Leave session
-  const leaveSession = () => {
-    console.log("[home.page] leave session")
-    setSessionId(null)
-    setSessionState(null)
-    setBattleEntities([])
-    setLootResults([])
-    router.push("/")
-  }
-
-  // Generate battle
-  const generateBattle = async (battleData: any) => {
-    if (!sessionId) return
-    setLoading(true)
-    console.log("[home.page] generate battle: start", { sessionId, battleData })
-    try {
-      const res = await fetch("/api/generate-battle", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ sessionId, ...battleData }),
-      })
-      const { data, raw } = await parseJsonSafe(res)
-      console.log("[home.page] generate battle: response", { ok: res.ok, status: res.status, len: raw.length })
-      if (!res.ok) throw new Error(raw || "Failed to generate battle")
-      setBattleEntities(data.entities || [])
-      toast({ title: "Battle generated", className: "bg-green-600 text-white" })
-    } catch (e: any) {
-      showError("Failed to generate battle", String(e?.message || e))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Generate loot
-  const generateLoot = async (lootData: any) => {
-    if (!sessionId) return
-    setLoading(true)
-    console.log("[home.page] generate loot: start", { sessionId, lootData })
-    try {
-      const res = await fetch("/api/generate-loot", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ sessionId, ...lootData }),
-      })
-      const { data, raw } = await parseJsonSafe(res)
-      console.log("[home.page] generate loot: response", { ok: res.ok, status: res.status, len: raw.length })
-      if (!res.ok) throw new Error(raw || "Failed to generate loot")
-      setLootResults(data.loot || [])
-      toast({ title: "Loot generated", className: "bg-green-600 text-white" })
-    } catch (e: any) {
-      showError("Failed to generate loot", String(e?.message || e))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Generate map
-  const generateMap = async () => {
-    if (!sessionId) return
-    setLoading(true)
-    console.log("[home.page] generate map: start", { sessionId })
-    try {
-      const res = await fetch("/api/generate-map", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ sessionId }),
-      })
-      const { data, raw } = await parseJsonSafe(res)
-      console.log("[home.page] generate map: response", { ok: res.ok, status: res.status, len: raw.length })
-      if (!res.ok) throw new Error(raw || "Failed to generate map")
-      // The map will be updated via the realtime session hook
-      toast({ title: "Map generated", className: "bg-green-600 text-white" })
-    } catch (e: any) {
-      showError("Failed to generate map", String(e?.message || e))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Copy session link
-  const copySessionLink = async () => {
-    if (!sessionId) return
-    const link = `${window.location.origin}/?sessionId=${sessionId}`
-    try {
-      await navigator.clipboard.writeText(link)
-      toast({ title: "Session link copied", className: "bg-green-600 text-white" })
-    } catch {
-      toast({ title: "Failed to copy link", variant: "destructive" })
-    }
-  }
-
-  if (!isLoaded) {
+  if (!user) {
     return (
-      <div className="h-screen bg-gray-900 text-white flex items-center justify-center">
-        <Loader2 className="h-10 w-10 animate-spin text-purple-500" />
-        <p className="ml-3 text-gray-400">Loading...</p>
+      <div className="min-h-screen flex items-center justify-center">
+        <Card className="w-96">
+          <CardHeader>
+            <CardTitle>Welcome to RPG Campaign Manager</CardTitle>
+            <CardDescription>Please sign in to continue</CardDescription>
+          </CardHeader>
+        </Card>
       </div>
     )
   }
-  if (!isSignedIn) return <RedirectToSignIn />
-
-  const isInSession = !!sessionId && !!sessionState
-  const isDM = sessionState?.dm_id === user?.id
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
-      <div className="mx-auto max-w-7xl px-4 py-6">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-4">
-            <h1 className="text-3xl font-bold text-purple-400">D&D Campaign Manager</h1>
-            {isInSession && (
-              <div className="flex items-center gap-2 text-sm text-gray-400">
-                <div className={`w-2 h-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`} />
-                <span>{isConnected ? "Connected" : "Disconnected"}</span>
-              </div>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <Button
-              onClick={() => router.push("/shopkeepers")}
-              variant="secondary"
-              className="bg-gray-800 border border-gray-700 text-white"
-            >
-              <ShoppingBag className="w-4 h-4 mr-2" /> Shopkeepers
-            </Button>
-            {isInSession && (
-              <>
-                <Button onClick={copySessionLink} variant="secondary" className="bg-gray-800 border border-gray-700">
-                  <Copy className="w-4 h-4 mr-2" /> Copy Link
-                </Button>
-                <Button onClick={leaveSession} variant="secondary" className="bg-gray-800 border border-gray-700">
-                  Leave Session
-                </Button>
-              </>
-            )}
-          </div>
+    <div className="min-h-screen bg-background">
+      <div className="container mx-auto p-4">
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold mb-2">RPG Campaign Manager</h1>
+          <p className="text-muted-foreground">Manage your campaigns, sessions, and adventures</p>
         </div>
 
-        {!isInSession ? (
-          /* Session Management */
-          <div className="grid md:grid-cols-2 gap-6">
-            {/* Create Session */}
-            <Card className="bg-gray-800 border-gray-700">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Plus className="w-5 h-5" />
-                  Create New Session
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <Label className="text-gray-300">Campaign</Label>
-                  <Select value={selectedCampaignId || ""} onValueChange={setSelectedCampaignId}>
-                    <SelectTrigger className="bg-gray-900 border-gray-700 text-white">
-                      <SelectValue placeholder="Select campaign" />
+        {/* Campaign Selection */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              Campaign Selection
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-4 items-end">
+              <div className="flex-1">
+                <Label htmlFor="campaign-select">Select Campaign</Label>
+                <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose a campaign..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {campaigns.map((campaign) => (
+                      <SelectItem key={campaign.id} value={campaign.id}>
+                        {campaign.name} {campaign.is_owner ? "(Owner)" : "(Member)"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button>
+                    <Plus className="h-4 w-4 mr-2" />
+                    New Campaign
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Create New Campaign</DialogTitle>
+                    <DialogDescription>Create a new campaign to organize your adventures</DialogDescription>
+                  </DialogHeader>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      const formData = new FormData(e.currentTarget)
+                      const name = formData.get("name") as string
+                      if (name) createCampaign(name)
+                    }}
+                  >
+                    <div className="space-y-4">
+                      <div>
+                        <Label htmlFor="name">Campaign Name</Label>
+                        <Input id="name" name="name" placeholder="Enter campaign name..." required />
+                      </div>
+                      <Button type="submit" className="w-full">
+                        Create Campaign
+                      </Button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Session Selection */}
+        {selectedCampaign && (
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <MapPin className="h-5 w-5" />
+                Session Management
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex gap-4 items-end">
+                <div className="flex-1">
+                  <Label htmlFor="session-select">Select Session</Label>
+                  <Select value={selectedSession} onValueChange={setSelectedSession}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choose a session..." />
                     </SelectTrigger>
-                    <SelectContent className="bg-gray-800 border-gray-700 text-white">
-                      {campaigns.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.name}
+                    <SelectContent>
+                      {sessions.map((session) => (
+                        <SelectItem key={session.id} value={session.id}>
+                          {session.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
-                  <Label className="text-gray-300">Session Name</Label>
-                  <Input
-                    value={sessionName}
-                    onChange={(e) => setSessionName(e.target.value)}
-                    placeholder="Enter session name"
-                    className="bg-gray-900 border-gray-700 text-white"
-                    onKeyDown={(e) => e.key === "Enter" && createSession()}
-                  />
-                </div>
-                <Button
-                  onClick={createSession}
-                  disabled={loading || !selectedCampaignId || !sessionName.trim()}
-                  className="w-full bg-purple-600 hover:bg-purple-700"
-                >
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
-                  Create Session
-                </Button>
-              </CardContent>
-            </Card>
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button>
+                      <Plus className="h-4 w-4 mr-2" />
+                      New Session
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Create New Session</DialogTitle>
+                      <DialogDescription>Create a new session for this campaign</DialogDescription>
+                    </DialogHeader>
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault()
+                        const formData = new FormData(e.currentTarget)
+                        const name = formData.get("name") as string
+                        if (name) createSession(name)
+                      }}
+                    >
+                      <div className="space-y-4">
+                        <div>
+                          <Label htmlFor="session-name">Session Name</Label>
+                          <Input id="session-name" name="name" placeholder="Enter session name..." required />
+                        </div>
+                        <Button type="submit" className="w-full">
+                          Create Session
+                        </Button>
+                      </div>
+                    </form>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-            {/* Join Session */}
-            <Card className="bg-gray-800 border-gray-700">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <UserPlus className="w-5 h-5" />
-                  Join Existing Session
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <Label className="text-gray-300">Session ID</Label>
-                  <Input
-                    placeholder="Enter session ID"
-                    className="bg-gray-900 border-gray-700 text-white"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        const target = e.target as HTMLInputElement
-                        joinSession(target.value)
-                      }
-                    }}
-                  />
-                </div>
-                <Button
-                  onClick={() => {
-                    const input = document.querySelector('input[placeholder="Enter session ID"]') as HTMLInputElement
-                    if (input) joinSession(input.value)
-                  }}
-                  disabled={sessionLoading}
-                  className="w-full bg-green-600 hover:bg-green-700"
-                >
-                  {sessionLoading ? (
-                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                  ) : (
-                    <UserPlus className="w-4 h-4 mr-2" />
-                  )}
-                  Join Session
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
-          /* Active Session */
-          <div className="space-y-6">
-            {/* Session Info */}
-            <Card className="bg-gray-800 border-gray-700">
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    {isDM && <Crown className="w-5 h-5 text-yellow-500" />}
-                    <span>{sessionState.name}</span>
-                    <span className="text-sm text-gray-400">({sessionId})</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm text-gray-400">
-                    <Users className="w-4 h-4" />
-                    <span>Campaign: {campaigns.find((c) => c.id === sessionState.campaign_id)?.name}</span>
-                  </div>
-                </CardTitle>
-              </CardHeader>
-            </Card>
+        {/* Main Content */}
+        {selectedSession && (
+          <Tabs defaultValue="battle" className="space-y-6">
+            <TabsList className="grid w-full grid-cols-5">
+              <TabsTrigger value="battle" className="flex items-center gap-2">
+                <Sword className="h-4 w-4" />
+                Battle
+              </TabsTrigger>
+              <TabsTrigger value="loot" className="flex items-center gap-2">
+                <Dice6 className="h-4 w-4" />
+                Loot
+              </TabsTrigger>
+              <TabsTrigger value="map" className="flex items-center gap-2">
+                <MapPin className="h-4 w-4" />
+                Map
+              </TabsTrigger>
+              <TabsTrigger value="initiative" className="flex items-center gap-2">
+                <Shield className="h-4 w-4" />
+                Initiative
+              </TabsTrigger>
+              <TabsTrigger value="chat" className="flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                Chat
+              </TabsTrigger>
+            </TabsList>
 
-            {sessionError && (
-              <Card className="bg-red-900/20 border-red-700">
-                <CardContent className="p-4">
-                  <p className="text-red-300">Session Error: {sessionError}</p>
+            <TabsContent value="battle" className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <BattleForm
+                  sessionId={selectedSession}
+                  onBattleGenerated={handleBattleGenerated}
+                  isGenerating={isGeneratingBattle}
+                  setIsGenerating={setIsGeneratingBattle}
+                />
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Battle History</CardTitle>
+                    <CardDescription>Previous battles in this session</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ScrollArea className="h-96">
+                      <div className="space-y-2">
+                        {battles.map((battle) => (
+                          <div
+                            key={battle.id}
+                            className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                              selectedBattle === battle.id ? "bg-primary/10 border-primary" : "hover:bg-muted"
+                            }`}
+                            onClick={() => setSelectedBattle(battle.id)}
+                          >
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <h4 className="font-medium">{battle.name}</h4>
+                                <p className="text-sm text-muted-foreground">{battle.entities?.length || 0} entities</p>
+                              </div>
+                              <Badge variant={selectedBattle === battle.id ? "default" : "secondary"}>
+                                {selectedBattle === battle.id ? "Active" : "Inactive"}
+                              </Badge>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Battle Details */}
+              {selectedBattle && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Battle Details</CardTitle>
+                    <CardDescription>Entities and actions for the current battle</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {(() => {
+                      const battle = battles.find((b) => b.id === selectedBattle)
+                      if (!battle) return <p>Battle not found</p>
+
+                      return (
+                        <div className="space-y-4">
+                          <div className="flex justify-between items-center">
+                            <h3 className="text-lg font-semibold">{battle.name}</h3>
+                            <div className="flex gap-2">
+                              <Button variant="outline" size="sm" onClick={regenerateMap}>
+                                Regenerate Map
+                              </Button>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <TokenList
+                              tokens={battle.entities || []}
+                              onTokenClick={handleCreatureClick}
+                              title="Monsters"
+                              filter={(token) => token.type === "monster"}
+                            />
+                            <TokenList
+                              tokens={battle.entities || []}
+                              onTokenClick={handleCreatureClick}
+                              title="Allies"
+                              filter={(token) => token.type === "ally"}
+                            />
+                          </div>
+                        </div>
+                      )
+                    })()}
+                  </CardContent>
+                </Card>
+              )}
+            </TabsContent>
+
+            <TabsContent value="loot" className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <LootForm
+                  onLootGenerated={handleLootGenerated}
+                  isGenerating={isGeneratingLoot}
+                  setIsGenerating={setIsGeneratingLoot}
+                />
+
+                <LootResults results={lootResults} />
+              </div>
+
+              <LootHistory sessionId={selectedSession} />
+            </TabsContent>
+
+            <TabsContent value="map" className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center justify-between">
+                    <span>Battle Map</span>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={regenerateMap} disabled={!selectedBattle}>
+                        Regenerate Map
+                      </Button>
+                    </div>
+                  </CardTitle>
+                  <CardDescription>Interactive battle map with tokens and positioning</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="border rounded-lg overflow-hidden">
+                    <CanvasMap
+                      mapUrl={memoMap}
+                      tokens={sessionState?.tokens || []}
+                      onTokensUpdate={handleTokenUpdate}
+                      width={800}
+                      height={600}
+                    />
+                  </div>
                 </CardContent>
               </Card>
-            )}
+            </TabsContent>
 
-            <Tabs defaultValue="battle" className="w-full">
-              <TabsList className="bg-gray-800">
-                <TabsTrigger value="battle">
-                  <Sword className="w-4 h-4 mr-2" />
-                  Battle
-                </TabsTrigger>
-                <TabsTrigger value="loot">
-                  <Dice6 className="w-4 h-4 mr-2" />
-                  Loot
-                </TabsTrigger>
-                <TabsTrigger value="map">
-                  <Map className="w-4 h-4 mr-2" />
-                  Map
-                </TabsTrigger>
-                <TabsTrigger value="chat">
-                  <MessageSquare className="w-4 h-4 mr-2" />
-                  Chat
-                </TabsTrigger>
-              </TabsList>
+            <TabsContent value="initiative" className="space-y-6">
+              <Initiative sessionId={selectedSession} battleId={selectedBattle} />
+            </TabsContent>
 
-              {/* Battle Tab */}
-              <TabsContent value="battle" className="space-y-4">
-                <div className="grid lg:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    {isDM && <BattleForm onGenerate={generateBattle} loading={loading} />}
-                    <Initiative entities={battleEntities} sessionId={sessionId} />
-                  </div>
-                  <TokenList entities={battleEntities} sessionId={sessionId} />
-                </div>
-              </TabsContent>
-
-              {/* Loot Tab */}
-              <TabsContent value="loot" className="space-y-4">
-                <div className="grid lg:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    {isDM && <LootForm onGenerate={generateLoot} loading={loading} />}
-                    <LootResults results={lootResults} />
-                  </div>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-lg font-semibold">Loot History</h3>
-                      <Switch checked={showLootHistory} onCheckedChange={setShowLootHistory} />
-                    </div>
-                    {showLootHistory && <LootHistory sessionId={sessionId} />}
-                  </div>
-                </div>
-              </TabsContent>
-
-              {/* Map Tab */}
-              <TabsContent value="map" className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold">Battle Map</h3>
-                  {isDM && (
-                    <Button onClick={generateMap} disabled={loading} className="bg-purple-600 hover:bg-purple-700">
-                      {loading ? (
-                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                      ) : (
-                        <RefreshCw className="w-4 h-4 mr-2" />
-                      )}
-                      Generate Map
-                    </Button>
-                  )}
-                </div>
-                <CanvasMap
-                  sessionId={sessionId}
-                  mapData={memoMap}
-                  tokens={tokensFromBattle(battleEntities)}
-                  isDM={isDM}
-                />
-              </TabsContent>
-
-              {/* Chat Tab */}
-              <TabsContent value="chat">
-                <ChatMessages messages={messages} onSendMessage={sendMessage} isConnected={isConnected} />
-              </TabsContent>
-            </Tabs>
-          </div>
+            <TabsContent value="chat" className="space-y-6">
+              <ChatMessages
+                sessionId={selectedSession}
+                messages={messages}
+                onSendMessage={sendMessage}
+                isLoading={isChatLoading}
+              />
+            </TabsContent>
+          </Tabs>
         )}
+
+        {/* Stat Block Dialog */}
+        <Dialog open={showStatBlock} onOpenChange={setShowStatBlock}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>{selectedCreature?.name || "Creature Stats"}</DialogTitle>
+            </DialogHeader>
+            {selectedCreature && <StatBlock creature={selectedCreature} />}
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   )

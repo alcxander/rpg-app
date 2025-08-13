@@ -217,7 +217,7 @@ export default function HomePage() {
     setSelectedBattle(battle.id)
 
     // Add battle tokens to map if map exists
-    if (memoMap) {
+    if (memoMap && sessionState) {
       const battleTokens = tokensFromBattle(battle)
       updateSessionState({
         ...sessionState,
@@ -242,10 +242,12 @@ export default function HomePage() {
 
       if (response.ok) {
         const data = await response.json()
-        updateSessionState({
-          ...sessionState,
-          map: data.mapUrl,
-        })
+        if (sessionState) {
+          updateSessionState({
+            ...sessionState,
+            map: data.mapUrl,
+          })
+        }
         toast({
           title: "Success",
           description: "Map regenerated successfully",
@@ -263,10 +265,12 @@ export default function HomePage() {
 
   // Handle token updates
   const handleTokenUpdate = (tokens: MapToken[]) => {
-    updateSessionState({
-      ...sessionState,
-      tokens,
-    })
+    if (sessionState) {
+      updateSessionState({
+        ...sessionState,
+        tokens,
+      })
+    }
   }
 
   // Handle creature click for stat block

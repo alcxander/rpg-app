@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useUser } from "@clerk/nextjs"
+import type { SessionState } from "@/types"
 
 export interface RealtimeSession {
   id: string
@@ -15,6 +16,7 @@ export interface RealtimeSession {
 export const useRealtimeSession = (sessionId: string | null) => {
   const { user, getToken } = useUser()
   const [session, setSession] = useState<RealtimeSession | null>(null)
+  const [sessionState, setSessionState] = useState<SessionState | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -51,10 +53,18 @@ export const useRealtimeSession = (sessionId: string | null) => {
         const data = await response.json()
         console.log("[useRealtimeSession] Session loaded:", data)
         setSession(data.session)
+
+        // Initialize session state
+        setSessionState({
+          id: sessionId,
+          map: data.session?.background_image || null,
+          tokens: [],
+        })
       } catch (err) {
         console.error("[useRealtimeSession] Error loading session:", err)
         setError(err instanceof Error ? err.message : "Unknown error")
         setSession(null)
+        setSessionState(null)
       } finally {
         setLoading(false)
       }
@@ -63,8 +73,14 @@ export const useRealtimeSession = (sessionId: string | null) => {
     loadSession()
   }, [sessionId, user, getToken])
 
+  const updateSessionState = (newState: SessionState) => {
+    setSessionState(newState)
+  }
+
   return {
     session,
+    sessionState,
+    updateSessionState,
     loading,
     error,
     refetch: () => {

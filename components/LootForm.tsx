@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -22,7 +21,7 @@ interface LootFormProps {
 export default function LootForm({ onLootGenerated, isGenerating, setIsGenerating }: LootFormProps) {
   const [partyLevel, setPartyLevel] = useState(3)
   const [encounterDifficulty, setEncounterDifficulty] = useState("Medium")
-  const [lootType, setLootType] = useState("Mixed")
+  const [lootType, setLootType] = useState("Treasure Hoard")
   const [additionalNotes, setAdditionalNotes] = useState("")
   const { toast } = useToast()
 
@@ -51,7 +50,7 @@ export default function LootForm({ onLootGenerated, isGenerating, setIsGeneratin
 
       toast({
         title: "Loot Generated!",
-        description: "New treasure has been created.",
+        description: "New treasure has been added to your collection.",
         className: "bg-green-600 text-white",
       })
 
@@ -76,7 +75,7 @@ export default function LootForm({ onLootGenerated, isGenerating, setIsGeneratin
           <Dice6 className="h-5 w-5" />
           Generate Loot
         </CardTitle>
-        <CardDescription>Create treasure for your encounters</CardDescription>
+        <CardDescription>Create treasure rewards for your party</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -114,11 +113,10 @@ export default function LootForm({ onLootGenerated, isGenerating, setIsGeneratin
                 <SelectValue placeholder="Select loot type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="Mixed">Mixed</SelectItem>
-                <SelectItem value="Weapons">Weapons</SelectItem>
-                <SelectItem value="Armor">Armor</SelectItem>
+                <SelectItem value="Individual Treasure">Individual Treasure</SelectItem>
+                <SelectItem value="Treasure Hoard">Treasure Hoard</SelectItem>
                 <SelectItem value="Magic Items">Magic Items</SelectItem>
-                <SelectItem value="Treasure">Treasure</SelectItem>
+                <SelectItem value="Coins Only">Coins Only</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -129,7 +127,7 @@ export default function LootForm({ onLootGenerated, isGenerating, setIsGeneratin
               id="additionalNotes"
               value={additionalNotes}
               onChange={(e) => setAdditionalNotes(e.target.value)}
-              placeholder="Any specific items or themes?"
+              placeholder="Any specific items or treasure themes?"
             />
           </div>
 

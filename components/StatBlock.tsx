@@ -1,5 +1,4 @@
 "use client"
-
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
@@ -10,78 +9,45 @@ interface StatBlockProps {
 }
 
 export default function StatBlock({ creature }: StatBlockProps) {
-  const stats = creature.stats || {}
-
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
           {creature.name}
-          <Badge variant={creature.type === "ally" ? "default" : "destructive"}>{creature.type}</Badge>
+          <Badge variant={creature.type === "monster" ? "destructive" : "default"}>{creature.type}</Badge>
         </CardTitle>
         <CardDescription>Combat Statistics</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <div className="text-sm font-medium">Hit Points</div>
-            <div className="text-lg">
-              {creature.hp}/{creature.max_hp}
-            </div>
+        <div className="grid grid-cols-3 gap-4">
+          <div className="text-center">
+            <div className="text-2xl font-bold">{creature.hp}</div>
+            <div className="text-sm text-muted-foreground">Hit Points</div>
           </div>
-          <div>
-            <div className="text-sm font-medium">Armor Class</div>
-            <div className="text-lg">{creature.ac}</div>
+          <div className="text-center">
+            <div className="text-2xl font-bold">{creature.ac}</div>
+            <div className="text-sm text-muted-foreground">Armor Class</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold">{creature.initiative_order}</div>
+            <div className="text-sm text-muted-foreground">Initiative</div>
           </div>
         </div>
 
         <Separator />
 
-        <div className="grid grid-cols-3 gap-4">
+        {creature.stats && Object.keys(creature.stats).length > 0 && (
           <div>
-            <div className="text-sm font-medium">STR</div>
-            <div className="text-center">{stats.strength || 10}</div>
-          </div>
-          <div>
-            <div className="text-sm font-medium">DEX</div>
-            <div className="text-center">{stats.dexterity || 10}</div>
-          </div>
-          <div>
-            <div className="text-sm font-medium">CON</div>
-            <div className="text-center">{stats.constitution || 10}</div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-4">
-          <div>
-            <div className="text-sm font-medium">INT</div>
-            <div className="text-center">{stats.intelligence || 10}</div>
-          </div>
-          <div>
-            <div className="text-sm font-medium">WIS</div>
-            <div className="text-center">{stats.wisdom || 10}</div>
-          </div>
-          <div>
-            <div className="text-sm font-medium">CHA</div>
-            <div className="text-center">{stats.charisma || 10}</div>
-          </div>
-        </div>
-
-        {stats.actions && (
-          <>
-            <Separator />
-            <div>
-              <div className="text-sm font-medium mb-2">Actions</div>
-              <div className="space-y-2">
-                {stats.actions.map((action: any, index: number) => (
-                  <div key={index} className="text-sm">
-                    <div className="font-medium">{action.name}</div>
-                    <div className="text-muted-foreground">{action.description}</div>
-                  </div>
-                ))}
-              </div>
+            <h4 className="font-medium mb-2">Additional Stats</h4>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              {Object.entries(creature.stats).map(([key, value]) => (
+                <div key={key} className="flex justify-between">
+                  <span className="capitalize">{key.replace("_", " ")}:</span>
+                  <span>{String(value)}</span>
+                </div>
+              ))}
             </div>
-          </>
+          </div>
         )}
       </CardContent>
     </Card>

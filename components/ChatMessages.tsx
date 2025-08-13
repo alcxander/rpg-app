@@ -1,21 +1,13 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Send, MessageCircle } from "lucide-react"
-
-interface Message {
-  id: string
-  user_id: string
-  user_name: string
-  content: string
-  created_at: string
-}
+import type { Message } from "@/types"
 
 interface ChatMessagesProps {
   sessionId: string

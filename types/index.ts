@@ -6,6 +6,17 @@ export interface CampaignOption {
   created_at?: string
 }
 
+export interface Campaign {
+  id: string
+  name: string
+  owner_id: string
+  is_owner: boolean
+  is_member: boolean
+  member_role: string | null
+  access_enabled?: boolean
+  created_at: string
+}
+
 export interface Shopkeeper {
   id: string
   campaign_id: string
@@ -91,17 +102,6 @@ export interface LootItem {
   quantity: number
 }
 
-export interface Campaign {
-  id: string
-  name: string
-  owner_id: string
-  is_owner: boolean
-  is_member: boolean
-  member_role: string | null
-  access_enabled?: boolean
-  created_at: string
-}
-
 export interface User {
   id: string
   clerk_id: string
@@ -118,4 +118,18 @@ export interface PlayerGold {
   player_clerk_id?: string
   role?: string
   joined_at?: string
+}
+
+export interface Message {
+  id: string
+  user_id: string
+  user_name: string
+  content: string
+  created_at: string
+}
+
+export interface SessionState {
+  id: string
+  map?: string | null
+  tokens?: MapToken[]
 }

@@ -126,7 +126,7 @@ export default function ShopkeepersPage() {
         showError("Failed to load campaigns", String(e?.message || e))
       }
     })()
-  }, [isLoaded, isSignedIn])
+  }, [isLoaded, isSignedIn, selectedCampaignId])
 
   // Load shopkeepers for a campaign
   const loadShopkeepers = async (cid: string) => {
@@ -381,7 +381,7 @@ export default function ShopkeepersPage() {
     autoGenTriggered.current = true
     console.log("[shopkeepers.page] auto-generate: trigger", { campaignId: selectedCampaignId, count: c || count })
     onGenerate()
-  }, [selectedCampaignId, shouldAutoGenerate])
+  }, [selectedCampaignId, shouldAutoGenerate, count])
 
   // Update inventory without full page reload
   const updateInventory = async (inventoryId: string, action: "increment" | "decrement") => {
@@ -561,7 +561,7 @@ export default function ShopkeepersPage() {
               <Home className="w-4 h-4 mr-2" /> Home
             </Button>
 
-            <Select value={selectedCampaignId || ""} onValueChange={(v) => setSelectedCampaignId(v)}>
+            <Select value={selectedCampaignId || ""} onValueChange={(value: string) => setSelectedCampaignId(value)}>
               <SelectTrigger className="bg-gray-800 border-gray-700 text-white w-64">
                 <SelectValue placeholder="Select campaign" />
               </SelectTrigger>
@@ -694,16 +694,6 @@ export default function ShopkeepersPage() {
                             const inStock = it.stock_quantity > 0
                             const accessEnabled = campaignAccessEnabled
                             const isDisabled = !inStock || !accessEnabled || (!isOwner && !canAfford)
-
-                            console.log(`[shopkeepers.page] Buy button for ${it.item_name}:`, {
-                              itemPrice: it.final_price,
-                              userGold,
-                              canAfford,
-                              inStock,
-                              accessEnabled,
-                              isOwner,
-                              isDisabled,
-                            })
 
                             return (
                               <div key={it.id} className="flex items-center justify-between text-sm">

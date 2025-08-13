@@ -1,0 +1,6 @@
+When responding to my change requests:
+1. Run all tests in `/tests` before sending me any updated code.
+2. Only send updated code if all tests pass.
+3. For every new change request, add at least one unit test that validates the requested change.
+4. Use Vitest/Jest to run the suite.
+5. Return test output as proof before sending code.

@@ -1,0 +1,92 @@
+. Shop Structure & Metadata
+Test: Each generated shop must have:
+
+A unique shopId
+
+A valid shopName (non-empty string)
+
+A valid shopkeeper object with name, race, age, temperament, quote
+
+Test: Shop name must be 3–50 characters long.
+
+Test: Temperament must be one of the predefined allowed temperaments.
+
+Test: Quote must be non-empty.
+
+B. Item Rules
+Test: Each shop contains between 5–30 items.
+
+Test: Each item has:
+
+A name
+
+price (positive integer)
+
+rarity (must be "common", "uncommon", "rare", "legendary")
+
+A description (non-empty string)
+
+quantity in stock (positive integer)
+
+Test: Price must match rarity rules:
+
+Common: ≤ 100 gold
+
+Uncommon: ≤ 500 gold
+
+Rare: ≤ 5,000 gold
+
+Legendary: ≥ 50,000 gold
+
+Test: a shop containing a legendary item is exactly 3% to happen on generation.
+
+Test: No shop contains more than 1 legendary item.
+
+C. Variety Rules
+Test: All 5 shops have different shopNames.
+
+Test: No two shops have the exact same item list.
+
+Test: Each shop’s inventory matches its “type” (e.g., weapon shop doesn’t sell arcane scrolls unless allowed, arcana shops sell things like potions and scrolls).
+
+D. Data Integrity
+Test: Rarity distribution — common items should be most frequent, rare and wonderous much less frequent.
+
+Test: No negative or zero prices.
+
+Test: prices must align closely but not exactly to the sane magic item prices here https://forums.giantitp.com/showthread.php?424243-Sane-Magic-Item-Prices
+
+Test: All descriptions must be at least 10 characters.
+
+E. Battle map Print-Friendly Format
+Test: The generated printout file:
+
+Has tokens separated by headers.
+
+Has the map clearly in the printout with gridlines
+
+Contains all required metadata fields from players and tokens on the side.
+
+Can be parsed without errors (valid markdown/HTML/plain text as expected).
+
+F. Persistence
+Test: When regenerating shops, new data is different from the last run (unless using a fixed seed for test).
+
+Test: Generated output is stable when using a fixed RNG seed.
+
+G. Extra Gameplay Logic
+Test: Shopkeepers’ temperament affects their pricing modifier.
+
+Test Shopkeepers' pricing can fluctuate down between 1%-10% if player is of same race as that Shopkeeper.
+
+Test: Toggle “available to players” hides the shop from player view but not from DM view.
+
+Test: Toggle “available to players” hides the shop from player view and shows an image that shows the shop is closed. Image is stored locally in public/shop/closed use a fallback blank if not found.
+
+
+
+
+code based tests
+
+Test: Affirm the typings being passed throughout code, adhere to typings and make sure there are no errors that say anything like 'argument of type X is not assignable to type Y'
+

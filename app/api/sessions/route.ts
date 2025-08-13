@@ -1,75 +1,255 @@
-import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
-import { createServerSupabaseClient } from '@/lib/supabaseAdmin';
-import type { SessionParticipant } from '@/lib/types';
+import { type NextRequest, NextResponse } from "next/server"
+import { auth } from "@clerk/nextjs/server"
+import { createAdminClient } from "@/lib/supabaseAdmin"
 
-export const runtime = 'nodejs';
+export const runtime = "nodejs"
 
-export async function GET(req: Request) {
-  const { userId, getToken } = await auth();
-  if (!userId || !getToken) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const token = await getToken({ template: 'supabase' });
-  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export async function GET(request: NextRequest) {
+  const reqId = Math.random().toString(36).substring(7)
 
-  const supabase = createServerSupabaseClient(token);
-  const url = new URL(req.url);
-  const campaignId = url.searchParams.get('campaignId');
+  try {
+    console.log("[api/sessions] GET start", { reqId })
 
-  if (!campaignId) return NextResponse.json({ error: 'campaignId is required' }, { status: 400 });
+    const { userId, getToken } = await auth()
+    if (!userId || !getToken) {
+      console.log("[api/sessions] GET unauthorized", { reqId })
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
-  console.log('[api/sessions] GET sessions for campaign', campaignId, 'user', userId)
+    const { searchParams } = new URL(request.url)
+    const campaignId = searchParams.get("campaignId")
 
-  const { data, error } = await supabase
-    .from('sessions')
-    .select('id, campaign_id, active, participants, updated_at')
-    .eq('campaign_id', campaignId)
-    .order('updated_at', { ascending: false });
+    if (!campaignId) {
+      console.log("[api/sessions] GET missing campaignId", { reqId })
+      return NextResponse.json({ error: "Campaign ID is required" }, { status: 400 })
+    }
 
-  if (error) {
-    console.error('[api/sessions] GET error:', error.message);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.log("[api/sessions] GET processing", { reqId, campaignId, userId })
+
+    const supabase = createAdminClient()
+
+    // Check if user has access to this campaign
+    let hasAccess = false
+    let accessReason = ""
+
+    // First check if user owns the campaign
+    const { data: campaign, error: campaignError } = await supabase
+      .from("campaigns")
+      .select("*")
+      .eq("id", campaignId)
+      .single()
+
+    if (campaignError || !campaign) {
+      console.log("[api/sessions] GET campaign not found", { reqId, campaignId, error: campaignError })
+      return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
+    }
+
+    if (campaign.owner_id === userId) {
+      hasAccess = true
+      accessReason = "campaign owner"
+    } else {
+      // Check if user is a member of the campaign
+      const { data: membership, error: memberError } = await supabase
+        .from("campaign_members")
+        .select("role")
+        .eq("campaign_id", campaignId)
+        .eq("user_id", userId)
+        .single()
+
+      if (membership) {
+        hasAccess = true
+        accessReason = `campaign member (${membership.role})`
+      } else if (memberError && memberError.code !== "PGRST116") {
+        console.error("[api/sessions] GET membership check error", { reqId, error: memberError })
+      }
+    }
+
+    if (!hasAccess) {
+      console.log("[api/sessions] GET access denied", {
+        reqId,
+        userId,
+        campaignId,
+        campaignOwnerId: campaign.owner_id,
+      })
+      return NextResponse.json(
+        {
+          error: "Access denied. You must be a member of this campaign to view its sessions.",
+        },
+        { status: 403 },
+      )
+    }
+
+    console.log("[api/sessions] GET access granted", { reqId, accessReason })
+
+    // Get sessions for this campaign
+    const { data: sessions, error: sessionsError } = await supabase
+      .from("sessions")
+      .select("*")
+      .eq("campaign_id", campaignId)
+      .order("created_at", { ascending: false })
+
+    if (sessionsError) {
+      console.error("[api/sessions] GET sessions query error", { reqId, error: sessionsError })
+      return NextResponse.json({ error: "Failed to fetch sessions" }, { status: 500 })
+    }
+
+    console.log("[api/sessions] GET success", {
+      reqId,
+      campaignId,
+      sessionCount: sessions?.length || 0,
+      accessReason,
+      sessions: sessions?.map((s) => ({ id: s.id, active: s.active, participants: s.participants?.length || 0 })),
+    })
+
+    return NextResponse.json({
+      sessions: sessions || [],
+      campaign: {
+        id: campaign.id,
+        name: campaign.name,
+        owner_id: campaign.owner_id,
+      },
+    })
+  } catch (error: any) {
+    console.error("[api/sessions] GET error", { reqId, error: error.message, stack: error.stack })
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
-  return NextResponse.json({ sessions: data });
 }
 
-export async function POST(req: Request) {
-  const { userId, getToken } = await auth();
-  if (!userId || !getToken) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const token = await getToken({ template: 'supabase' });
-  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export async function POST(request: NextRequest) {
+  const reqId = Math.random().toString(36).substring(7)
 
-  const supabase = createServerSupabaseClient(token);
-  const { campaignId, sessionId } = await req.json();
-  if (!campaignId || !sessionId) return NextResponse.json({ error: 'campaignId and sessionId are required' }, { status: 400 });
+  try {
+    console.log("[api/sessions] POST start", { reqId })
 
-  console.log('[api/sessions] POST create session', sessionId, 'for campaign', campaignId, 'user', userId)
+    const { userId, getToken } = await auth()
+    if (!userId || !getToken) {
+      console.log("[api/sessions] POST unauthorized", { reqId })
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
-  // ensure campaign exists and is owned by user (RLS will enforce anyway)
-  const campaign = await supabase.from('campaigns').select('id, owner_id, settings').eq('id', campaignId).maybeSingle();
-  if (campaign.error || !campaign.data) {
-    console.error('[api/sessions] campaign fetch error', campaign.error?.message)
-    return NextResponse.json({ error: campaign.error?.message || 'Campaign not found' }, { status: 404 });
+    const body = await request.json()
+    const { campaignId, sessionId } = body
+
+    if (!campaignId || !sessionId) {
+      console.log("[api/sessions] POST missing required fields", { reqId, campaignId, sessionId })
+      return NextResponse.json({ error: "Campaign ID and session ID are required" }, { status: 400 })
+    }
+
+    console.log("[api/sessions] POST processing", { reqId, campaignId, sessionId, userId })
+
+    const supabase = createAdminClient()
+
+    // Check if user has permission to create sessions in this campaign
+    let canCreate = false
+    let accessReason = ""
+
+    // First check if user owns the campaign
+    const { data: campaign, error: campaignError } = await supabase
+      .from("campaigns")
+      .select("*")
+      .eq("id", campaignId)
+      .single()
+
+    if (campaignError || !campaign) {
+      console.log("[api/sessions] POST campaign not found", { reqId, campaignId, error: campaignError })
+      return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
+    }
+
+    if (campaign.owner_id === userId) {
+      canCreate = true
+      accessReason = "campaign owner"
+    } else {
+      // Check if user is a DM in the campaign
+      const { data: membership, error: memberError } = await supabase
+        .from("campaign_members")
+        .select("role")
+        .eq("campaign_id", campaignId)
+        .eq("user_id", userId)
+        .single()
+
+      if (membership && membership.role === "DM") {
+        canCreate = true
+        accessReason = "campaign DM"
+      } else if (memberError && memberError.code !== "PGRST116") {
+        console.error("[api/sessions] POST membership check error", { reqId, error: memberError })
+      }
+    }
+
+    if (!canCreate) {
+      console.log("[api/sessions] POST insufficient permissions", {
+        reqId,
+        userId,
+        campaignId,
+        campaignOwnerId: campaign.owner_id,
+      })
+      return NextResponse.json(
+        {
+          error: "Only campaign owners and DMs can create sessions",
+        },
+        { status: 403 },
+      )
+    }
+
+    console.log("[api/sessions] POST permission granted", { reqId, accessReason })
+
+    // Check if session already exists
+    const { data: existingSession, error: existingError } = await supabase
+      .from("sessions")
+      .select("id")
+      .eq("id", sessionId)
+      .single()
+
+    if (existingSession) {
+      console.log("[api/sessions] POST session already exists", { reqId, sessionId })
+      return NextResponse.json({ error: "Session ID already exists" }, { status: 400 })
+    }
+
+    // Create the session
+    const { data: newSession, error: createError } = await supabase
+      .from("sessions")
+      .insert({
+        id: sessionId,
+        campaign_id: campaignId,
+        participants: [userId], // Creator is automatically a participant
+        active: true,
+      })
+      .select()
+      .single()
+
+    if (createError) {
+      console.error("[api/sessions] POST create error", { reqId, error: createError })
+      return NextResponse.json({ error: "Failed to create session" }, { status: 500 })
+    }
+
+    // Create the initial map for this session
+    const { error: mapError } = await supabase.from("maps").insert({
+      session_id: sessionId,
+      grid_size: 30,
+      tokens: [],
+      terrain_data: null,
+      background_image: null,
+    })
+
+    if (mapError) {
+      console.error("[api/sessions] POST map creation error", { reqId, error: mapError })
+      // Don't fail session creation if map creation fails
+    }
+
+    console.log("[api/sessions] POST success", {
+      reqId,
+      sessionId,
+      campaignId,
+      userId,
+      accessReason,
+    })
+
+    return NextResponse.json({
+      success: true,
+      session: newSession,
+      message: `Session "${sessionId}" created successfully`,
+    })
+  } catch (error: any) {
+    console.error("[api/sessions] POST error", { reqId, error: error.message, stack: error.stack })
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
-
-  const members: string[] = Array.isArray((campaign.data.settings as any)?.members) ? (campaign.data.settings as any).members : [];
-  const participants: SessionParticipant[] = [
-    { userId, role: 'DM' },
-    ...members.filter((m) => m !== userId).map((m) => ({ userId: m, role: 'Player' as const })),
-  ];
-
-  const upsert = await supabase
-    .from('sessions')
-    .upsert(
-      { id: sessionId, campaign_id: campaignId, active: true, participants },
-      { onConflict: 'campaign_id,id' }
-    )
-    .select('id, participants')
-    .single();
-
-  if (upsert.error) {
-    console.error('[api/sessions] upsert error', upsert.error.message)
-    return NextResponse.json({ error: upsert.error.message }, { status: 500 });
-  }
-  console.log('[api/sessions] Created/Upserted session', upsert.data?.id)
-  return NextResponse.json({ session: upsert.data });
 }

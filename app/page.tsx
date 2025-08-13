@@ -60,7 +60,7 @@ const CanvasMap = dynamic(() => import("@/components/CanvasMap").then((m) => m.d
   ),
 })
 
-type CampaignOption = { id: string; name: string }
+type CampaignOption = { id: string; name: string; is_owner?: boolean; is_member?: boolean; member_role?: string }
 type SessionOption = { id: string; campaign_id: string }
 
 export default function HomePage() {
@@ -73,6 +73,8 @@ export default function HomePage() {
   const [ensureUserError, setEnsureUserError] = useState<string | null>(null)
 
   const [campaigns, setCampaigns] = useState<CampaignOption[]>([])
+  const [campaignsLoading, setCampaignsLoading] = useState(false)
+  const [campaignsError, setCampaignsError] = useState<string | null>(null)
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
   const [sessions, setSessions] = useState<SessionOption[]>([])
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -116,19 +118,22 @@ export default function HomePage() {
       if (!isLoaded || !isSignedIn) return
       setEnsureUserError(null)
       try {
+        console.log("[HomePage] Ensuring user exists", { userId })
         const res = await fetch("/api/ensure-user", { method: "POST" })
         const body = await res.json().catch(() => ({}))
         if (!res.ok || !body?.ok) {
           throw new Error(body?.error || "Failed to ensure user")
         }
+        console.log("[HomePage] User ensured successfully")
         setUserReady(true)
       } catch (e: any) {
+        console.error("[HomePage] Failed to ensure user", e)
         setEnsureUserError(e.message || "Failed to ensure user")
         setUserReady(false)
       }
     }
     run()
-  }, [isLoaded, isSignedIn])
+  }, [isLoaded, isSignedIn, userId])
 
   const handleJoinSession = useCallback(
     async (targetSessionId: string, targetUserId: string) => {
@@ -184,48 +189,115 @@ export default function HomePage() {
   )
 
   const fetchCampaigns = useCallback(async () => {
-    const res = await fetch("/api/campaigns", { method: "GET", credentials: "include" })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) {
+    console.log("[HomePage] fetchCampaigns called", { userReady, isSignedIn, userId })
+
+    if (!userReady || !isSignedIn || !userId) {
+      console.log("[HomePage] fetchCampaigns skipped - not ready", { userReady, isSignedIn, userId })
+      return
+    }
+
+    setCampaignsLoading(true)
+    setCampaignsError(null)
+
+    try {
+      console.log("[HomePage] fetchCampaigns making request")
+      const res = await fetch("/api/campaigns", {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
+
+      console.log("[HomePage] fetchCampaigns response", { status: res.status, ok: res.ok })
+
+      const data = await res.json().catch(() => ({}))
+      console.log("[HomePage] fetchCampaigns data", data)
+
+      if (!res.ok) {
+        throw new Error(data?.error || `HTTP ${res.status}`)
+      }
+
+      // Handle both response formats: { campaigns: [...] } or [...]
+      const campaignsList = Array.isArray(data) ? data : data.campaigns || []
+      console.log("[HomePage] fetchCampaigns processed", { campaignsList })
+
+      setCampaigns(campaignsList)
+
+      // Auto-select first campaign if none selected
+      if (!selectedCampaignId && campaignsList.length > 0) {
+        console.log("[HomePage] Auto-selecting first campaign", { campaignId: campaignsList[0].id })
+        setSelectedCampaignId(campaignsList[0].id)
+      }
+
+      toast({
+        title: "Campaigns Loaded",
+        description: `Found ${campaignsList.length} campaigns`,
+        className: "bg-green-600 text-white",
+      })
+    } catch (error: any) {
+      console.error("[HomePage] fetchCampaigns error", error)
+      setCampaignsError(error.message || "Failed to load campaigns")
       toast({
         title: "Error loading campaigns",
-        description: data?.error || "Unknown error",
+        description: error.message || "Unknown error",
         variant: "destructive",
         className: "bg-red-600 text-white",
       })
-      return
+    } finally {
+      setCampaignsLoading(false)
     }
-    setCampaigns(data.campaigns || [])
-    if (!selectedCampaignId && data.campaigns?.[0]) {
-      setSelectedCampaignId(data.campaigns[0].id)
-    }
-  }, [selectedCampaignId, toast])
+  }, [userReady, isSignedIn, userId, selectedCampaignId, toast])
 
   const fetchSessions = useCallback(
     async (campaignId: string) => {
-      const res = await fetch(`/api/sessions?campaignId=${encodeURIComponent(campaignId)}`)
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
+      console.log("[HomePage] fetchSessions called", { campaignId })
+
+      if (!campaignId) {
+        setSessions([])
+        return
+      }
+
+      try {
+        const res = await fetch(`/api/sessions?campaignId=${encodeURIComponent(campaignId)}`)
+        const data = await res.json().catch(() => ({}))
+
+        console.log("[HomePage] fetchSessions response", { status: res.status, data })
+
+        if (!res.ok) {
+          throw new Error(data?.error || "Failed to fetch sessions")
+        }
+
+        setSessions(data.sessions || [])
+      } catch (error: any) {
+        console.error("[HomePage] fetchSessions error", error)
         toast({
           title: "Error loading sessions",
-          description: data?.error || "Unknown error",
+          description: error.message || "Unknown error",
           variant: "destructive",
           className: "bg-red-600 text-white",
         })
-        return
       }
-      setSessions(data.sessions || [])
     },
     [toast],
   )
 
+  // Fetch campaigns when user is ready
   useEffect(() => {
-    if (isLoaded && isSignedIn && userReady) fetchCampaigns()
+    console.log("[HomePage] useEffect for fetchCampaigns", { isLoaded, isSignedIn, userReady })
+    if (isLoaded && isSignedIn && userReady) {
+      fetchCampaigns()
+    }
   }, [isLoaded, isSignedIn, userReady, fetchCampaigns])
 
+  // Fetch sessions when campaign changes
   useEffect(() => {
-    if (selectedCampaignId) fetchSessions(selectedCampaignId)
-    else setSessions([])
+    console.log("[HomePage] useEffect for fetchSessions", { selectedCampaignId })
+    if (selectedCampaignId) {
+      fetchSessions(selectedCampaignId)
+    } else {
+      setSessions([])
+    }
   }, [selectedCampaignId, fetchSessions])
 
   useEffect(() => {
@@ -355,25 +427,40 @@ export default function HomePage() {
   const onCreateCampaign = async () => {
     const name = newCampaignName.trim()
     if (!name) return
-    const res = await fetch("/api/campaigns", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-      credentials: "include",
-    })
-    const data = await res.json().catch(() => ({}))
-    if (res.ok) {
-      setNewCampaignName("")
-      await fetchCampaigns()
-      if (data.campaign?.id) {
-        setSelectedCampaignId(data.campaign.id)
-        await fetchSessions(data.campaign.id)
+
+    console.log("[HomePage] Creating campaign", { name })
+
+    try {
+      const res = await fetch("/api/campaigns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+        credentials: "include",
+      })
+
+      const data = await res.json().catch(() => ({}))
+      console.log("[HomePage] Create campaign response", { status: res.status, data })
+
+      if (res.ok) {
+        setNewCampaignName("")
+        await fetchCampaigns()
+        if (data.campaign?.id) {
+          setSelectedCampaignId(data.campaign.id)
+          await fetchSessions(data.campaign.id)
+        }
+        toast({
+          title: "Campaign Created",
+          description: `Created "${name}" successfully`,
+          className: "bg-green-600 text-white",
+        })
+      } else {
+        throw new Error(data.error || "Failed to create campaign")
       }
-      toast({ title: "Campaign Created", className: "bg-green-600 text-white" })
-    } else {
+    } catch (error: any) {
+      console.error("[HomePage] Create campaign error", error)
       toast({
         title: "Error",
-        description: data.error || "Failed to create campaign",
+        description: error.message || "Failed to create campaign",
         variant: "destructive",
         className: "bg-red-600 text-white",
       })
@@ -419,7 +506,7 @@ export default function HomePage() {
       await fetchSessions(selectedCampaignId)
       toast({
         title: "Player Invited",
-        description: "They now have access to this campaign’s sessions.",
+        description: "They now have access to this campaign's sessions.",
         className: "bg-green-600 text-white",
       })
     } else {
@@ -481,7 +568,7 @@ export default function HomePage() {
         <h1 className="text-2xl font-semibold mb-2">Setting up your account...</h1>
         <p className="text-gray-400 max-w-md mb-4">
           {
-            "We’re linking your profile to the game database, if you're seeing this sorry just gotta link your profile across systems. It drops sometimes. You must exist in our database to use the app."
+            "We're linking your profile to the game database, if you're seeing this sorry just gotta link your profile across systems. It drops sometimes. You must exist in our database to use the app."
           }
         </p>
         {ensureUserError && <p className="text-red-400 text-sm mb-2">{ensureUserError}</p>}
@@ -645,15 +732,7 @@ export default function HomePage() {
             variant="secondary"
             size="icon"
             className="bg-gray-700 text-white border-gray-600"
-            onClick={async () => {
-              if (!userId) return
-              await navigator.clipboard.writeText(userId)
-              toast({
-                title: "Copied",
-                description: "Your user ID was copied to clipboard",
-                className: "bg-green-600 text-white",
-              })
-            }}
+            onClick={copyUserId}
             title="Copy your user ID"
           >
             <Copy className="w-4 h-4" />
@@ -670,15 +749,39 @@ export default function HomePage() {
 
             <div className="space-y-3">
               <Label className="text-gray-300">Select Campaign</Label>
+
+              {/* Campaign Loading State */}
+              {campaignsLoading && (
+                <div className="flex items-center gap-2 p-2 text-gray-400">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Loading campaigns...</span>
+                </div>
+              )}
+
+              {/* Campaign Error State */}
+              {campaignsError && (
+                <div className="p-2 bg-red-900/20 border border-red-700 rounded text-red-400 text-sm">
+                  Error: {campaignsError}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={fetchCampaigns}
+                    className="ml-2 text-red-400 hover:text-red-300"
+                  >
+                    Retry
+                  </Button>
+                </div>
+              )}
+
               <div className="flex gap-2 items-center">
                 <Select value={selectedCampaignId || ""} onValueChange={(v) => setSelectedCampaignId(v)}>
                   <SelectTrigger className="bg-gray-700 border-gray-600 text-white">
-                    <SelectValue placeholder="Choose campaign" />
+                    <SelectValue placeholder={campaigns.length === 0 ? "No campaigns found" : "Choose campaign"} />
                   </SelectTrigger>
                   <SelectContent className="bg-gray-800 text-white border-gray-700 max-h-64">
                     {campaigns.map((c) => (
                       <SelectItem key={c.id} value={c.id}>
-                        {c.name}
+                        {c.name} {c.is_owner ? "(Owner)" : c.is_member ? `(${c.member_role})` : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -693,6 +796,7 @@ export default function HomePage() {
                   onClick={onCreateCampaign}
                   className="bg-green-600 hover:bg-green-700 text-white"
                   title="Create campaign"
+                  disabled={!newCampaignName.trim()}
                 >
                   <Plus className="h-4 w-4" />
                 </Button>
@@ -758,6 +862,14 @@ export default function HomePage() {
                 </p>
               )}
               {sessionError && <p className="text-sm text-red-400">Error: {sessionError}</p>}
+
+              {/* Debug Info */}
+              <div className="text-xs text-gray-500 p-2 bg-gray-800 rounded">
+                <div>Campaigns: {campaigns.length}</div>
+                <div>Selected: {selectedCampaignId || "none"}</div>
+                <div>User Ready: {userReady ? "✓" : "✗"}</div>
+                <div>Loading: {campaignsLoading ? "✓" : "✗"}</div>
+              </div>
             </div>
 
             {/* Chat */}

@@ -41,9 +41,13 @@ export async function GET(req: NextRequest) {
     // Check if user has access to this campaign
     let hasAccess = false
     let accessReason = ""
+    let userRole = "Player" // Default to Player
+    let isOwner = false
 
     if (userId && campaign.owner_id === userId) {
       hasAccess = true
+      isOwner = true
+      userRole = "Owner"
       accessReason = "campaign owner"
     } else if (userId) {
       // Check if user is a member of the campaign
@@ -56,6 +60,7 @@ export async function GET(req: NextRequest) {
 
       if (membership) {
         hasAccess = true
+        userRole = membership.role
         accessReason = `campaign member (${membership.role})`
       } else if (memberError && memberError.code !== "PGRST116") {
         console.error("[api/shopkeepers] GET membership check error", { reqId, error: memberError })
@@ -132,14 +137,18 @@ export async function GET(req: NextRequest) {
       campaignId,
       count: result.length,
       accessReason,
+      userRole,
     })
 
     return NextResponse.json({
       campaign: {
         id: campaignId,
         name: campaign.name,
+        access_enabled: campaign.access_enabled,
         hasAccess: true,
         accessReason,
+        isOwner,
+        userRole,
       },
       shopkeepers: result,
     })

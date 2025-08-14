@@ -24,14 +24,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     const supabase = createAdminClient()
 
-    // First, get the current inventory item and verify ownership
+    // First, get the current inventory item and verify ownership/DM privileges
     const { data: inventory, error: inventoryError } = await supabase
       .from("shopkeeper_inventory")
       .select(`
         *,
         shopkeepers!inner(
           campaign_id,
-          campaigns!inner(owner_id)
+          campaigns!inner(
+            owner_id,
+            campaign_members!inner(
+              user_id,
+              role
+            )
+          )
         )
       `)
       .eq("id", id)
@@ -42,15 +48,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "Inventory item not found" }, { status: 404 })
     }
 
-    // Check if user owns the campaign
     const isOwner = inventory.shopkeepers.campaigns.owner_id === userId
-    if (!isOwner) {
+    const userMembership = inventory.shopkeepers.campaigns.campaign_members.find(
+      (member: any) => member.user_id === userId,
+    )
+    const isDM = userMembership?.role === "DM"
+    const hasDMPrivileges = isOwner || isDM
+
+    if (!hasDMPrivileges) {
       console.log("[api/shopkeepers/inventory] PATCH forbidden", {
         reqId,
         userId,
         ownerId: inventory.shopkeepers.campaigns.owner_id,
+        userRole: userMembership?.role || "none",
+        hasDMPrivileges,
       })
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+      return NextResponse.json({ error: "Forbidden - requires DM privileges" }, { status: 403 })
     }
 
     const currentQuantity = inventory.stock_quantity || 0
@@ -75,11 +88,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       action,
       oldQuantity: currentQuantity,
       newQuantity,
+      userRole: userMembership?.role || "owner",
     })
 
     return NextResponse.json({
       success: true,
-      inventory: updatedInventory,
+      item: updatedInventory,
       oldQuantity: currentQuantity,
       newQuantity,
     })

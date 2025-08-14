@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getAuth } from "@clerk/nextjs/server"
+import { auth } from "@clerk/nextjs/server"
 import { createAdminClient } from "@/lib/supabaseAdmin"
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -9,7 +9,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const { id } = await params
     console.log("[api/shopkeepers/inventory] PATCH start", { reqId, inventoryId: id })
 
-    const { userId } = getAuth(req)
+    const { userId } = await auth()
     if (!userId) {
       console.log("[api/shopkeepers/inventory] PATCH unauthorized", { reqId })
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })

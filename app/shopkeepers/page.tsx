@@ -45,6 +45,7 @@ export default function ShopkeepersPage() {
   const [shopkeepers, setShopkeepers] = useState<Shopkeeper[]>([])
   const [campaignAccessEnabled, setCampaignAccessEnabled] = useState<boolean>(true)
   const [isOwner, setIsOwner] = useState<boolean>(false)
+  const [userRole, setUserRole] = useState<string>("Player")
   const [playersGold, setPlayersGold] = useState<PlayerGold[]>([])
   const [userGold, setUserGold] = useState<number>(0)
 
@@ -137,10 +138,12 @@ export default function ShopkeepersPage() {
       setShopkeepers(data.shopkeepers || [])
       setCampaignAccessEnabled(Boolean(data.campaign?.access_enabled))
       setIsOwner(Boolean(data.campaign?.isOwner))
+      setUserRole(data.campaign?.userRole || "Player")
       console.log("[shopkeepers.page] load shopkeepers: set", {
         items: (data.shopkeepers || []).length,
         access: Boolean(data.campaign?.access_enabled),
         isOwner: Boolean(data.campaign?.isOwner),
+        userRole: data.campaign?.userRole || "Player",
       })
     } catch (e: any) {
       showError("Error loading shopkeepers", String(e?.message || e))
@@ -151,7 +154,7 @@ export default function ShopkeepersPage() {
 
   // Load players gold for DM
   const loadPlayersGold = async (cid: string) => {
-    if (!isOwner) return
+    if (!isOwner && userRole !== "DM") return
     console.log("[shopkeepers.page] load players gold: start", { campaignId: cid })
     try {
       const res = await fetch(`/api/players/gold?campaignId=${encodeURIComponent(cid)}`, { credentials: "include" })
@@ -167,7 +170,7 @@ export default function ShopkeepersPage() {
 
   // Load user's own gold for players
   const loadUserGold = async (cid: string) => {
-    if (isOwner || !user?.id) return
+    if (isOwner || userRole === "DM" || !user?.id) return
     console.log("[shopkeepers.page] load user gold: start", { campaignId: cid, userId: user.id })
     try {
       const res = await fetch(
@@ -190,7 +193,7 @@ export default function ShopkeepersPage() {
       loadPlayersGold(selectedCampaignId)
       loadUserGold(selectedCampaignId)
     }
-  }, [selectedCampaignId, isOwner])
+  }, [selectedCampaignId, isOwner, userRole])
 
   // Generate (now allows 1–20 and tops up only the delta)
   const onGenerate = async () => {
@@ -438,6 +441,14 @@ export default function ShopkeepersPage() {
     }
   }
 
+  const hasDMPrivileges = () => {
+    return isOwner || userRole === "DM"
+  }
+
+  const isRegularPlayer = () => {
+    return !isOwner && userRole === "Player"
+  }
+
   if (!isLoaded) {
     return (
       <div className="h-screen bg-gray-900 text-white flex items-center justify-center">
@@ -455,7 +466,7 @@ export default function ShopkeepersPage() {
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold text-purple-400">Shopkeepers</h1>
           <div className="flex gap-2 items-center">
-            {!isOwner && (
+            {isRegularPlayer() && (
               <div className="flex items-center gap-2 bg-yellow-600/20 px-3 py-2 rounded-lg border border-yellow-600/40">
                 <Coins className="w-4 h-4 text-yellow-400" />
                 <span className="text-yellow-200 font-medium">{userGold} Gold</span>
@@ -515,8 +526,8 @@ export default function ShopkeepersPage() {
         <Tabs defaultValue="market">
           <TabsList className="bg-gray-800">
             <TabsTrigger value="market">Market</TabsTrigger>
-            {isOwner && <TabsTrigger value="management">Management</TabsTrigger>}
-            {isOwner && <TabsTrigger value="players">Players</TabsTrigger>}
+            {hasDMPrivileges() && <TabsTrigger value="management">Management</TabsTrigger>}
+            {hasDMPrivileges() && <TabsTrigger value="players">Players</TabsTrigger>}
           </TabsList>
 
           {/* Market Tab */}
@@ -531,7 +542,7 @@ export default function ShopkeepersPage() {
                   <AlertTriangle className="w-4 h-4 text-yellow-300" />
                   <p>No shopkeepers yet.</p>
                 </div>
-                {isOwner && (
+                {hasDMPrivileges() && (
                   <Button
                     onClick={onQuickSeed}
                     disabled={seeding || !selectedCampaignId}
@@ -551,7 +562,6 @@ export default function ShopkeepersPage() {
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {shopkeepers.map((sk) => (
                   <Card key={sk.id} className="bg-gray-800 border-gray-700 relative overflow-hidden">
-                    {/* Soft diffused color blob */}
                     <div
                       className="pointer-events-none absolute -top-8 -right-8 w-40 h-40 rounded-full blur-2xl"
                       style={blobStyleFor(sk.id)}
@@ -563,7 +573,7 @@ export default function ShopkeepersPage() {
                           {sk.name} <span className="text-xs text-gray-400">({sk.shop_type})</span>
                         </span>
                         <div className="flex items-center gap-2">
-                          {isOwner && (
+                          {hasDMPrivileges() && (
                             <Button
                               size="icon"
                               variant="secondary"
@@ -608,7 +618,7 @@ export default function ShopkeepersPage() {
                                 </div>
                               </div>
                               <div className="flex items-center gap-2">
-                                {isOwner ? (
+                                {hasDMPrivileges() ? (
                                   <>
                                     <Button
                                       size="sm"
@@ -656,7 +666,7 @@ export default function ShopkeepersPage() {
           </TabsContent>
 
           {/* Management Tab */}
-          {isOwner && (
+          {hasDMPrivileges() && (
             <TabsContent value="management" className="mt-4">
               <Card className="bg-gray-800 border-gray-700 mb-4">
                 <CardHeader>
@@ -719,7 +729,7 @@ export default function ShopkeepersPage() {
           )}
 
           {/* Players Tab */}
-          {isOwner && (
+          {hasDMPrivileges() && (
             <TabsContent value="players" className="mt-4">
               <Card className="bg-gray-800 border-gray-700">
                 <CardHeader>

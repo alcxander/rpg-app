@@ -45,7 +45,6 @@ export const createBrowserClientWithToken = (token: string) => {
   // Store token for REST and update Realtime
   currentAuthToken = token
   try {
-    // @ts-expect-error realtime.setAuth exists on sub-client
     client.realtime.setAuth(token)
   } catch {}
   return client

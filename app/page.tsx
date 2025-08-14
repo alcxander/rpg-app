@@ -99,6 +99,7 @@ export default function HomePage() {
     moveTokenAndLog,
     setSessionState,
   } = useRealtimeSession(sessionId)
+
   const { messages: chatMessages, sendMessage } = useSessionChat(sessionId)
   const [sendingChat, setSendingChat] = useState(false)
   const { toast } = useToast()

@@ -66,29 +66,37 @@ export async function GET(req: NextRequest) {
   }
 
   let query = supabase
-    .from("players_gold")
+    .from("campaign_members")
     .select(`
-      player_id, 
-      gold_amount,
-      users!players_gold_player_id_fkey (
+      user_id,
+      role,
+      users!campaign_members_user_id_fkey (
         name,
         clerk_id
+      ),
+      players_gold!left (
+        gold_amount
       )
     `)
     .eq("campaign_id", campaignId)
+    .in("role", ["Player", "DM"]) // Include both players and DMs
 
   if (playerId) {
-    query = query.eq("player_id", playerId)
+    query = query.eq("user_id", playerId)
   }
 
   const { data, error } = await query
 
-  if (error) return NextResponse.json({ error: "Failed to load gold" }, { status: 500 })
+  if (error) {
+    console.error("[api/players/gold] Query error:", error)
+    return NextResponse.json({ error: "Failed to load players" }, { status: 500 })
+  }
 
   const formattedData = (data || []).map((row: any) => ({
-    player_id: row.player_id,
-    gold_amount: row.gold_amount,
+    player_id: row.user_id,
+    gold_amount: row.players_gold?.[0]?.gold_amount || 0,
     player_name: row.users?.name || null,
+    role: row.role,
   }))
 
   return NextResponse.json({ rows: formattedData })

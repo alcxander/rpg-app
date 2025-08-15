@@ -393,7 +393,7 @@ export default function ShopkeepersPage() {
         className: "bg-green-600 text-white",
       })
 
-      await loadPlayersGold(selectedCampaignId)
+      setPlayersGold((prev) => prev.map((p) => (p.player_id === playerId ? { ...p, gold_amount: newAmount } : p)))
     } catch (e: any) {
       showError("Error updating gold", String(e?.message || e))
     }
@@ -743,7 +743,9 @@ export default function ShopkeepersPage() {
                     <div className="text-center py-8 text-gray-400">
                       <Coins className="w-12 h-12 mx-auto mb-4 opacity-50" />
                       <p>No player gold records found</p>
-                      <p className="text-sm">Gold records are created when players make purchases</p>
+                      <p className="text-sm">
+                        Gold records are created when players make purchases or are manually added
+                      </p>
                     </div>
                   ) : (
                     <div className="space-y-4">

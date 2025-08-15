@@ -2,8 +2,8 @@ import { type NextRequest, NextResponse } from "next/server"
 import { auth } from "@clerk/nextjs/server"
 import { createServerSupabaseClient } from "@/lib/supabaseAdmin"
 
-// GET /api/players/gold?campaignId=...
-// DM-only read of all player gold for the campaign
+// GET /api/players/gold?campaignId=...&playerId=...
+// DM/Owner can read all player gold for campaign, or specific player gold
 export async function GET(req: NextRequest) {
   const { userId, getToken } = await auth()
   if (!userId || !getToken) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -12,11 +12,12 @@ export async function GET(req: NextRequest) {
   if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const campaignId = req.nextUrl.searchParams.get("campaignId")
+  const playerId = req.nextUrl.searchParams.get("playerId")
+
   if (!campaignId) return NextResponse.json({ error: "campaignId required" }, { status: 400 })
 
   const supabase = createServerSupabaseClient(token)
 
-  // Verify DM ownership using the original owner_id field
   const { data: camp, error: cErr } = await supabase
     .from("campaigns")
     .select("id, owner_id")
@@ -24,20 +25,77 @@ export async function GET(req: NextRequest) {
     .single()
 
   if (cErr || !camp) return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
-  if (camp.owner_id !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
-  const { data, error } = await supabase
+  // Check if user is owner or DM
+  let hasDMPrivileges = false
+  let accessReason = ""
+
+  if (camp.owner_id === userId) {
+    hasDMPrivileges = true
+    accessReason = "campaign owner"
+  } else {
+    // Check if user is a DM in this campaign
+    const { data: membership, error: memberError } = await supabase
+      .from("campaign_members")
+      .select("role")
+      .eq("campaign_id", campaignId)
+      .eq("user_id", userId)
+      .single()
+
+    if (membership && membership.role === "DM") {
+      hasDMPrivileges = true
+      accessReason = "campaign DM"
+    } else if (memberError && memberError.code !== "PGRST116") {
+      console.error("[api/players/gold] GET membership check error", { error: memberError })
+    }
+  }
+
+  if (!hasDMPrivileges && playerId === userId) {
+    const { data, error } = await supabase
+      .from("players_gold")
+      .select("player_id, gold_amount")
+      .eq("campaign_id", campaignId)
+      .eq("player_id", userId)
+
+    if (error) return NextResponse.json({ error: "Failed to load gold" }, { status: 500 })
+    return NextResponse.json({ rows: data || [] })
+  }
+
+  if (!hasDMPrivileges) {
+    return NextResponse.json({ error: "Forbidden - requires DM privileges" }, { status: 403 })
+  }
+
+  let query = supabase
     .from("players_gold")
-    .select("player_id, gold_amount")
+    .select(`
+      player_id, 
+      gold_amount,
+      users!players_gold_player_id_fkey (
+        name,
+        clerk_id
+      )
+    `)
     .eq("campaign_id", campaignId)
+
+  if (playerId) {
+    query = query.eq("player_id", playerId)
+  }
+
+  const { data, error } = await query
 
   if (error) return NextResponse.json({ error: "Failed to load gold" }, { status: 500 })
 
-  return NextResponse.json({ rows: data || [] })
+  const formattedData = (data || []).map((row: any) => ({
+    player_id: row.player_id,
+    gold_amount: row.gold_amount,
+    player_name: row.users?.name || null,
+  }))
+
+  return NextResponse.json({ rows: formattedData })
 }
 
 // POST /api/players/gold
-// DM-only upsert of a player's gold row
+// DM/Owner can upsert a player's gold row
 export async function POST(req: NextRequest) {
   const { userId, getToken } = await auth()
   if (!userId || !getToken) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -52,10 +110,34 @@ export async function POST(req: NextRequest) {
 
   const supabase = createServerSupabaseClient(token)
 
-  // Verify DM ownership
   const { data: camp, error: cErr } = await supabase.from("campaigns").select("owner_id").eq("id", campaignId).single()
+
   if (cErr || !camp) return NextResponse.json({ error: "Campaign not found" }, { status: 404 })
-  if (camp.owner_id !== userId) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+
+  // Check if user is owner or DM
+  let hasDMPrivileges = false
+
+  if (camp.owner_id === userId) {
+    hasDMPrivileges = true
+  } else {
+    // Check if user is a DM in this campaign
+    const { data: membership, error: memberError } = await supabase
+      .from("campaign_members")
+      .select("role")
+      .eq("campaign_id", campaignId)
+      .eq("user_id", userId)
+      .single()
+
+    if (membership && membership.role === "DM") {
+      hasDMPrivileges = true
+    } else if (memberError && memberError.code !== "PGRST116") {
+      console.error("[api/players/gold] POST membership check error", { error: memberError })
+    }
+  }
+
+  if (!hasDMPrivileges) {
+    return NextResponse.json({ error: "Forbidden - requires DM privileges" }, { status: 403 })
+  }
 
   // Upsert player's gold
   const safeGold = Math.max(0, Math.round(Number(goldAmount) * 100) / 100)

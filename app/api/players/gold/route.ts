@@ -65,39 +65,61 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden - requires DM privileges" }, { status: 403 })
   }
 
-  let query = supabase
+  // First, get all campaign members who are players
+  let membersQuery = supabase
     .from("campaign_members")
-    .select(`
-      user_id,
-      role,
-      users!campaign_members_user_id_fkey (
-        name,
-        clerk_id
-      ),
-      players_gold!left (
-        gold_amount
-      )
-    `)
+    .select("user_id, role")
     .eq("campaign_id", campaignId)
     .in("role", ["Player", "DM"]) // Include both players and DMs
 
   if (playerId) {
-    query = query.eq("user_id", playerId)
+    membersQuery = membersQuery.eq("user_id", playerId)
   }
 
-  const { data, error } = await query
+  const { data: members, error: membersError } = await membersQuery
 
-  if (error) {
-    console.error("[api/players/gold] Query error:", error)
-    return NextResponse.json({ error: "Failed to load players" }, { status: 500 })
+  if (membersError) {
+    console.error("[api/players/gold] Members query error:", membersError)
+    return NextResponse.json({ error: "Failed to load campaign members" }, { status: 500 })
   }
 
-  const formattedData = (data || []).map((row: any) => ({
-    player_id: row.user_id,
-    gold_amount: row.players_gold?.[0]?.gold_amount || 0,
-    player_name: row.users?.name || null,
-    role: row.role,
-  }))
+  if (!members || members.length === 0) {
+    return NextResponse.json({ rows: [] })
+  }
+
+  // Get user details for all members
+  const userIds = members.map((m) => m.user_id)
+  const { data: users, error: usersError } = await supabase.from("users").select("id, name, clerk_id").in("id", userIds)
+
+  if (usersError) {
+    console.error("[api/players/gold] Users query error:", usersError)
+    return NextResponse.json({ error: "Failed to load user details" }, { status: 500 })
+  }
+
+  // Get gold amounts for all members
+  const { data: goldData, error: goldError } = await supabase
+    .from("players_gold")
+    .select("player_id, gold_amount")
+    .eq("campaign_id", campaignId)
+    .in("player_id", userIds)
+
+  if (goldError) {
+    console.error("[api/players/gold] Gold query error:", goldError)
+    return NextResponse.json({ error: "Failed to load gold data" }, { status: 500 })
+  }
+
+  // Combine the data manually
+  const formattedData = members.map((member: any) => {
+    const user = users?.find((u) => u.id === member.user_id)
+    const gold = goldData?.find((g) => g.player_id === member.user_id)
+
+    return {
+      player_id: member.user_id,
+      gold_amount: gold?.gold_amount || 0,
+      player_name: user?.name || null,
+      role: member.role,
+    }
+  })
 
   return NextResponse.json({ rows: formattedData })
 }
